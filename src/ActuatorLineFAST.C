@@ -44,6 +44,33 @@ namespace sierra{
 namespace nalu{
 
 
+#ifndef Contiguous2DArrayHack
+#define Contiguous2DArrayHack
+
+// Neat hack from http://stackoverflow.com/questions/21943621/how-to-create-a-contiguous-2d-array-in-c to allocate and deallocate contiguous 2D arrays in C++
+
+  /* double **dPtr = create2DArray<double>(10,10); */
+  /* dPtr[0][0] = 10;  // for example */
+  /* delete2DArray(dPtr);  // free the memory */
+
+template <typename T> T** create2DArray(unsigned nrows, unsigned ncols) {
+
+  T** ptr = new T*[nrows];  // allocate pointers
+  T* pool = new T[nrows*ncols];  // allocate pool
+  for (unsigned i = 0; i < nrows; ++i, pool += ncols )
+    ptr[i] = pool;
+  return ptr;
+}
+
+template <typename T> void delete2DArray(T** arr) {
+
+  delete [] arr[0];  // remove the pool
+  delete [] arr;     // remove the pointers
+}
+
+#endif
+
+
 //==========================================================================
 // Class Definition
 //==========================================================================
@@ -53,11 +80,18 @@ namespace nalu{
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
 ActuatorLineFASTInfo::ActuatorLineFASTInfo() 
-  : processorId_(0),
-    numPoints_(1),
-    turbineName_("machine_one")
+  : procId_(-1),
+    procIdGroup_(-1),
+    globTurbId_(0),
+    numPoints_(0),
+    turbineName_("machine_one"),
+    coords_(NULL),
+    velocity_(NULL),
+    force_(NULL),
+    nType_(NULL)
 {
-  // nothing to do
+  boundingSphereVec_.resize(0);
+  actuatorLinePointInfoMap_.clear();
 }
 
 
@@ -67,38 +101,31 @@ ActuatorLineFASTInfo::ActuatorLineFASTInfo()
 ActuatorLineFASTInfo::~ActuatorLineFASTInfo()
 {
   // nothing to do
+  if (MPI_COMM_NULL != turbineComm_) { // Act on this turbine only if I'm a part of the turbine MPI_Group
+    delete2DArray(coords_);
+    delete2DArray(velocity_);
+    delete2DArray(force_);
+    delete [] nType_ ;
+    delete [] bestX_ ;
+  }
+
+  MPI_Group_free(&turbineGroup_);
+  MPI_Comm_free(&turbineComm_);
 }
 
 
 //==========================================================================
 // Class Definition
 //==========================================================================
-// ActuatorLineFASTPointInfo - holds individual points information
+// ActuatorLineFASTPointInfo - holds individual points search information
 //==========================================================================
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
-ActuatorLineFASTPointInfo::ActuatorLineFASTPointInfo( 
-  size_t localId, 
-  Point centroidCoords, 
-  double searchRadius,
-  Coordinates epsilon,
-  double *velocity,
-  ActuatorNodeType nType,
-  size_t globTurbId)
-  : localId_(localId),
-    centroidCoords_(centroidCoords),
-    searchRadius_(searchRadius),
-    epsilon_(epsilon),
-    bestX_(1.0e16),
-    bestElem_(stk::mesh::Entity()),
-    nodeType_(nType),
-    globTurbId_(globTurbId)
+ActuatorLineFASTPointInfo::ActuatorLineFASTPointInfo(double searchRadius):
+  searchRadius_(searchRadius)
 {
-  // initialize point velocity and displacement
-  velocity_[0] = velocity[0];
-  velocity_[1] = velocity[1];
-  velocity_[2] = velocity[2];
+  // nothing to do
 }
 
 
@@ -125,10 +152,7 @@ ActuatorLineFAST::ActuatorLineFAST(
   : Actuator(realm, node),
     realm_(realm),
     searchMethod_(stk::search::BOOST_RTREE),
-    actuatorLineGhosting_(NULL),
-    needToGhostCount_(0),
-    actuatorLineMotion_(false),
-    pi_(acos(-1.0))
+    actuatorLineMotion_(false)
 {
   // load the data
   load(node);
@@ -174,6 +198,8 @@ ActuatorLineFAST::~ActuatorLineFAST()
 {
 
   FAST.end(); // Call destructors in FAST_cInterface
+
+  MPI_Group_free(&worldMPIGroup_);
 
   // delete data probes specifications vector
   for ( size_t k = 0; k < actuatorLineInfo_.size(); ++k )
@@ -320,11 +346,13 @@ ActuatorLineFAST::setup()
     tEnd = (ntEnd - ntStart)*dt + tStart ;
   }
   FAST.setTend( tEnd );
+  
+  MPI_Comm_group(NaluEnv::self().parallel_comm(), &worldMPIGroup_);
 
 }
 
 //--------------------------------------------------------------------------
-//-------- initialize ------------------------------------------------------
+//-------- allocateTurbinesToProcs------------------------------------------
 //--------------------------------------------------------------------------
 void
 ActuatorLineFAST::allocateTurbinesToProcs()
@@ -335,7 +363,6 @@ ActuatorLineFAST::allocateTurbinesToProcs()
   // clear some of the search info
   boundingHubSphereVec_.clear();
   boundingProcBoxVec_.clear();
-  searchKeyPair_.clear();
 
   const int nDim = metaData.spatial_dimension();
 
@@ -348,16 +375,33 @@ ActuatorLineFAST::allocateTurbinesToProcs()
     theKey theIdent(NaluEnv::self().parallel_rank(), NaluEnv::self().parallel_rank());
 
     // define a point that will hold the hub location
+    boundingHubBigSphereVec_.clear();
+    searchKeyPair_.clear();
     Point hubPointCoords;
     double hubCoords[3] = {};
     FAST.getHubPos(hubCoords, iTurb);
     for ( int j = 0; j < nDim; ++j )  hubPointCoords[j] = hubCoords[j];
     boundingSphere theSphere( Sphere(hubPointCoords, 1.0), theIdent);
     boundingHubSphereVec_.push_back(theSphere);
-    
-  }
-  stk::search::coarse_search(boundingHubSphereVec_, boundingProcBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), searchKeyPair_, false);
+    boundingSphere theBigSphere( Sphere(hubPointCoords, 95.0), theIdent);
+    boundingHubBigSphereVec_.push_back(theBigSphere);
+    stk::search::coarse_search( boundingHubBigSphereVec_, boundingProcBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), searchKeyPair_, false);
 
+    ActuatorLineFASTInfo *actuatorLineInfo = actuatorLineInfo_[iTurb];
+    const int nTurbineGroupProcs = searchKeyPair_.size();
+    int * turbineGroupProcs = new int[nTurbineGroupProcs];
+    int iProc=0;
+    std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
+    for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
+      turbineGroupProcs[iProc] = ii->second.proc();
+      NaluEnv::self().naluOutput() << "Turbine: " << iTurb << " box_proc: " << ii->second.proc() << std::endl ;
+      iProc++;
+    }
+    MPI_Group_incl(worldMPIGroup_, nTurbineGroupProcs, turbineGroupProcs, &(actuatorLineInfo->turbineGroup_) );
+    MPI_Comm_create_group(NaluEnv::self().parallel_comm(), actuatorLineInfo->turbineGroup_, iTurb, &(actuatorLineInfo->turbineComm_) );
+  }
+
+  stk::search::coarse_search(boundingHubSphereVec_, boundingProcBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), searchKeyPair_, false);
   int iTurb=0;
   std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
   for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
@@ -406,31 +450,7 @@ ActuatorLineFAST::update()
  
   const int nDim = metaData.spatial_dimension();
 
-  // initialize need to ghost and elems to ghost
-  needToGhostCount_ = 0;
-  elemsToGhost_.clear();
-
-  // clear actuatorLinePointInfoMap_
-  std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
-  for( iterPoint=actuatorLinePointInfoMap_.begin(); iterPoint!=actuatorLinePointInfoMap_.end(); ++iterPoint )
-    delete (*iterPoint).second;
-  actuatorLinePointInfoMap_.clear();
-  
-  bulkData.modification_begin();
-  
-  if ( actuatorLineGhosting_ == NULL) {
-    // create new ghosting
-    std::string theGhostName = "nalu_actuator_line_ghosting";
-    actuatorLineGhosting_ = &bulkData.create_ghosting( theGhostName );
-  }
-  else {
-    bulkData.destroy_ghosting(*actuatorLineGhosting_);
-  }
-  
-  bulkData.modification_end();
-  
   // clear some of the search info
-  boundingSphereVec_.clear();
   boundingElementBoxVec_.clear();
   searchKeyPair_.clear();
 
@@ -440,12 +460,6 @@ ActuatorLineFAST::update()
   // create the ActuatorLineFASTPointInfo
   create_actuator_line_point_info_map();
 
-  // coarse search
-  determine_elems_to_ghost();
-
-  // manage ghosting
-  manage_ghosting();
-  
   // complete filling in the set of elements connected to the centroid
   complete_search();
 }
@@ -462,268 +476,290 @@ ActuatorLineFAST::execute()
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
   const int nDim = metaData.spatial_dimension();
 
-  // extract fields
-  VectorFieldType *coordinates 
-    = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
-  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
-  VectorFieldType *actuator_source 
-    = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "actuator_source");
-  ScalarFieldType *actuator_source_lhs
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "actuator_source_lhs");
-  ScalarFieldType *g
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "g");
-  ScalarFieldType *density
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density"); 
-  // deal with proper viscosity
-  const std::string viscName = realm_.is_turbulent() ? "effective_viscosity" : "viscosity";
-  ScalarFieldType *viscosity
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName); 
+  // // extract fields
+  // VectorFieldType *coordinates 
+  //   = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  // VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  // VectorFieldType *actuator_source 
+  //   = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "actuator_source");
+  // ScalarFieldType *actuator_source_lhs
+  //   = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "actuator_source_lhs");
+  // ScalarFieldType *g
+  //   = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "g");
+  // ScalarFieldType *density
+  //   = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density"); 
+  // // deal with proper viscosity
+  // const std::string viscName = realm_.is_turbulent() ? "effective_viscosity" : "viscosity";
+  // ScalarFieldType *viscosity
+  //   = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName); 
 
-  // fixed size scratch
-  std::vector<double> ws_pointGasVelocity(nDim);
-  std::vector<double> ws_elemCentroid(nDim);
-  std::vector<double> ws_pointForce(nDim);
-  std::vector<double> ws_elemForce(nDim);
-  double ws_pointGasDensity;
-  double ws_pointGasViscosity;
-  double ws_pointForceLHS;
+  // // fixed size scratch
+  // std::vector<double> ws_pointGasVelocity(nDim);
+  // std::vector<double> ws_elemCentroid(nDim);
+  // std::vector<double> ws_pointForce(nDim);
+  // std::vector<double> ws_elemForce(nDim);
+  // double ws_pointGasDensity;
+  // double ws_pointGasViscosity;
+  // double ws_pointForceLHS;
   
-  // zero out source term; do this manually since there are custom ghosted entities
-  stk::mesh::Selector s_nodes = stk::mesh::selectField(*actuator_source);
-  stk::mesh::BucketVector const& node_buckets =
-    realm_.get_buckets( stk::topology::NODE_RANK, s_nodes );
-  for ( stk::mesh::BucketVector::const_iterator ib = node_buckets.begin() ;
-        ib != node_buckets.end() ; ++ib ) {
-    stk::mesh::Bucket & b = **ib ;
-    const stk::mesh::Bucket::size_type length   = b.size();
-    double * actSrc = stk::mesh::field_data(*actuator_source, b);
-    double * actSrcLhs = stk::mesh::field_data(*actuator_source_lhs, b);
-    double * gF = stk::mesh::field_data(*g, b);
-    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
-      actSrcLhs[k] = 0.0;
-      gF[k] = 0.0;
-      const int offSet = k*nDim;
-      for ( int j = 0; j < nDim; ++j ) {
-        actSrc[offSet+j] = 0.0;
-      }
-    }
-  }
+  // // zero out source term; do this manually since there are custom ghosted entities
+  // stk::mesh::Selector s_nodes = stk::mesh::selectField(*actuator_source);
+  // stk::mesh::BucketVector const& node_buckets =
+  //   realm_.get_buckets( stk::topology::NODE_RANK, s_nodes );
+  // for ( stk::mesh::BucketVector::const_iterator ib = node_buckets.begin() ;
+  //       ib != node_buckets.end() ; ++ib ) {
+  //   stk::mesh::Bucket & b = **ib ;
+  //   const stk::mesh::Bucket::size_type length   = b.size();
+  //   double * actSrc = stk::mesh::field_data(*actuator_source, b);
+  //   double * actSrcLhs = stk::mesh::field_data(*actuator_source_lhs, b);
+  //   double * gF = stk::mesh::field_data(*g, b);
+  //   for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+  //     actSrcLhs[k] = 0.0;
+  //     gF[k] = 0.0;
+  //     const int offSet = k*nDim;
+  //     for ( int j = 0; j < nDim; ++j ) {
+  //       actSrc[offSet+j] = 0.0;
+  //     }
+  //   }
+  // }
 
-  // parallel communicate data to the ghosted elements; again can communicate points to element ranks
-  if ( NULL != actuatorLineGhosting_ ) {
-    std::vector< const stk::mesh::FieldBase *> ghostFieldVec;
-    // fields that are needed
-    ghostFieldVec.push_back(coordinates);
-    ghostFieldVec.push_back(velocity);
-    ghostFieldVec.push_back(viscosity);
-    stk::mesh::communicate_field_data(*actuatorLineGhosting_, ghostFieldVec);
-  }
-
-  // loop over map and get velocity at points
-  std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
-  int np=0;
-  for (iterPoint  = actuatorLinePointInfoMap_.begin();
-       iterPoint != actuatorLinePointInfoMap_.end();
-       ++iterPoint) {
-
-    // actuator line info object of interest
-    ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
-
-    //==========================================================================
-    // extract the best element; compute drag given this velocity, property, etc
-    // this point drag value will be used by all other elements below
-    //==========================================================================
-    stk::mesh::Entity bestElem = infoObject->bestElem_;
-    int nodesPerElement = bulkData.num_nodes(bestElem);
+  // for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
     
-    // resize some work vectors
-    resize_std_vector(nDim, ws_coordinates_, bestElem, bulkData);
-    resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
-    resize_std_vector(1, ws_viscosity_, bestElem, bulkData);
-    resize_std_vector(1, ws_density_, bestElem, bulkData);
+  //   ActuatorLineFASTInfo *ali = actuatorLineInfo_[iTurb];
 
-    // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
-    gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem), 
-                 nodesPerElement);
-    gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem), 
-                            nodesPerElement);
-    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem), 
-                            nodesPerElement);
-    gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem), 
-                            nodesPerElement);
+  //   if (MPI_COMM_NULL != ali->turbineComm) { // Act on this turbine only if I'm a part of the turbine MPI_Group
 
-    // compute volume
-    double elemVolume = compute_volume(nDim, bestElem, bulkData);
+  //     // loop over map and get velocity at points
+  //     std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
+  //     for (iterPoint  = ali->actuatorLinePointInfoMap_.begin();
+  // 	   iterPoint != ali->actuatorLinePointInfoMap_.end();
+  // 	   ++iterPoint) {
 
-    // interpolate velocity
-    interpolate_field(nDim, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
-                      &ws_velocity_[0], &ws_pointGasVelocity[0]);
-    
-    // interpolate viscosity
-    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
-                      &ws_viscosity_[0], &ws_pointGasViscosity);
+  // 	// actuator line info object of interest
+  // 	ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
+  // 	size_t pointId = (*iterPoint).first
 
-    // interpolate density
-    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
-                      &ws_density_[0], &ws_pointGasDensity);
+  // 	//==========================================================================
+  // 	// extract the best element; compute drag given this velocity, property, etc
+  // 	// this point drag value will be used by all other elements below
+  // 	//==========================================================================
+  // 	stk::mesh::Entity bestElem = infoObject->bestElem_;
+  // 	if ( bulkData.is_valid(elem) ) {
 
-    if (FAST.isDebug() ) {
-      NaluEnv::self().naluOutput() << "Node " << np << " Velocity = " << ws_pointGasVelocity[0] << " " << ws_pointGasVelocity[1] << " " << ws_pointGasVelocity[2] << " " << std::endl ;
-    }
+  // 	  int nodesPerElement = bulkData.num_nodes(bestElem);
+	  
+  // 	  // resize some work vectors
+  // 	  resize_std_vector(nDim, ws_coordinates_, bestElem, bulkData);
+  // 	  resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
+  // 	  resize_std_vector(1, ws_viscosity_, bestElem, bulkData);
+  // 	  resize_std_vector(1, ws_density_, bestElem, bulkData);
+	  
+  // 	  // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
+  // 	  gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem), 
+  // 		       nodesPerElement);
+  // 	  gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem), 
+  // 				  nodesPerElement);
+  // 	  gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem), 
+  // 				  nodesPerElement);
+  // 	  gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem), 
+  // 				  nodesPerElement);
+	  
+  // 	  // compute volume
+  // 	  double elemVolume = compute_volume(nDim, bestElem, bulkData);
+	  
+  // 	  // interpolate velocity
+  // 	  interpolate_field(nDim, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
+  // 			    &ws_velocity_[0], &ws_pointGasVelocity[0]);
+	  
+  // 	  // interpolate viscosity
+  // 	  interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
+  // 			    &ws_viscosity_[0], &ws_pointGasViscosity);
+	  
+  // 	  // interpolate density
+  // 	  interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
+  // 			    &ws_density_[0], &ws_pointGasDensity);
+	  
+	  
+  // 	  for (int j=0; j<nDim; j++) ali->velocity[pointId][j] = ws_pointGasVelocity_[j];
 
-    FAST.setVelocity(ws_pointGasVelocity, np, infoObject->globTurbId_);
-    np = np + 1;
+  // 	} else {
+  // 	  for (int j=0; j<nDim; j++) ali->velocity[pointId][j] = 0.0;
+  // 	}
 
-  }    
+  //     }
 
-  if ( ! FAST.isDryRun() ) {
+  //     MPI_Reduce(MPI_IN_PLACE, ali->velocity_[0], ali->numPoints_ * nDim, MPI_DOUBLE, MPI_SUM, ali->procIdGroup_, ali->turbineComm_);
 
-    if ( FAST.isTimeZero() ) {
-      FAST.solution0();
-    }
-
-    //Step FAST
-    FAST.step();
-  }
- 
-  // do we have mesh motion?
-  if ( actuatorLineMotion_ )
-    update();
-
-  // loop over map and assemble source terms
-  np = 0;
-  for (iterPoint  = actuatorLinePointInfoMap_.begin();
-       iterPoint != actuatorLinePointInfoMap_.end();
-       ++iterPoint) {
-
-    // actuator line info object of interest
-    ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
-
-    //==========================================================================
-    // extract the best element; compute drag given this velocity, property, etc
-    // this point drag value will be used by all other elements below
-    //==========================================================================
-    stk::mesh::Entity bestElem = infoObject->bestElem_;
-    int nodesPerElement = bulkData.num_nodes(bestElem);
-    // compute volume
-    double elemVolume = compute_volume(nDim, bestElem, bulkData);
-
-    FAST.getForce(ws_pointForce, np, infoObject->globTurbId_);
-    if (FAST.isDebug() ) {
-      NaluEnv::self().naluOutput() << "Node " << np << " Type " << infoObject->nodeType_ << " Force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << " " << std::endl ;
-    }
-  //ws_pointForce[0] = 0.0; //Setting to zero for now
-  //ws_pointForce[1] = 0.0;
-  //ws_pointForce[2] = 0.0;
-  //ws_pointForceLHS = 0.0; //Not clear what this should be - FIGURE IT OUT
-    // assemble nodal quantity; radius should be zero, so we can apply fill point drag
-  //assemble_source_to_nodes(nDim, bestElem, bulkData, elemVolume, &ws_pointForce[0], ws_pointForceLHS, 
-  //                         *actuator_source, *actuator_source_lhs, 1.0);
-
-    // get the vector of elements
-    std::vector<stk::mesh::Entity> elementVec = infoObject->elementVec_;
-
-    // Set up the necessary variables to check that forces/projection function are integrating up correctly.
-    double gSum = 0.0;
-    double forceSum[nDim];
-    forceSum[0] = 0.0;
-    forceSum[1] = 0.0;
-    if (nDim>2){
-      forceSum[2] = 0.0;
-    }
-
-    // iterate them and apply source term; gather coords
-    for ( size_t k = 0; k < elementVec.size(); ++k ) {
-
-      stk::mesh::Entity elem = elementVec[k];
-
-      nodesPerElement = bulkData.num_nodes(elem);
-    
-      // resize some work vectors
-      resize_std_vector(nDim, ws_coordinates_, elem, bulkData);
-
-      // gather coordinates
-      gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(elem), 
-                   nodesPerElement);
-
-      // compute volume
-      double elemVolume = compute_volume(nDim, elem, bulkData);
-
-      // determine element centroid
-      compute_elem_centroid(nDim, &ws_elemCentroid[0], nodesPerElement);
-
-      // compute distance
-      const double distance = compute_distance(nDim, &ws_elemCentroid[0], &(infoObject->centroidCoords_[0]));
-
-      double gA = 0.0;
+  //     if (ali->procId == NaluEnv::self().parallel_rank()) {
+  // 	for (int iNode =0; iNode < ali->numPoints_; iNode++) {
+  // 	  if (FAST.isDebug() ) {
+  // 	    NaluEnv::self().naluOutput() << "Node " << np << " Velocity = " << ws_pointGasVelocity[0] << " " << ws_pointGasVelocity[1] << " " << ws_pointGasVelocity[2] << " " << std::endl ;
+  // 	  }
+  // 	  FAST.setVelocity(ws_pointGasVelocity, pointId, infoObject->globTurbId_);
+  // 	}
+	
       
-      switch (infoObject->nodeType_) {
-      case HUB:
-        // project the force to this element centroid with projection function
-        gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
-        compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
-        // assemble nodal quantity; no LHS contribution here...
-        assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
-                                 0.0, *actuator_source, *actuator_source_lhs, *g, 0.0);
-        forceSum[0] += ws_elemForce[0]*elemVolume;
-        forceSum[1] += ws_elemForce[1]*elemVolume;
-        if (nDim > 2){
-          forceSum[2] += ws_elemForce[2]*elemVolume;
-        }
-        gSum += gA*elemVolume;
-        break;
+  // 	if ( ! FAST.isDryRun() ) {
+	
+  // 	  if ( FAST.isTimeZero() ) {
+  // 	    FAST.solution0();
+  // 	  }
+	  
+  // 	  //Step FAST
+  // 	  FAST.step();
+  // 	}
+  //     }
 
-      case BLADE:
-        // project the force to this element centroid with projection function
-        gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
-        compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
-        // assemble nodal quantity; no LHS contribution here...
-        assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
-                                 gA, *actuator_source, *actuator_source_lhs, *g, 0.0);
-        forceSum[0] += ws_elemForce[0]*elemVolume;
-        forceSum[1] += ws_elemForce[1]*elemVolume;
-        if (nDim > 2){
-          forceSum[2] += ws_elemForce[2]*elemVolume;
-        }
-        gSum += gA*elemVolume;
-        break;
+  //   }
+  // }
+ 
+  // // Are the actuator points moving?
+  // if ( actuatorLineMotion_ )
+  //   update();
 
-      case TOWER:
-        // project the force to this element centroid with projection function
-        gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
-        compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
-        // assemble nodal quantity; no LHS contribution here...
-        assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
-                                 gA, *actuator_source, *actuator_source_lhs, *g, 0.0);
-        forceSum[0] += ws_elemForce[0]*elemVolume;
-        forceSum[1] += ws_elemForce[1]*elemVolume;
-        if (nDim > 2){
-          forceSum[2] += ws_elemForce[2]*elemVolume;
-        }
-        gSum += gA*elemVolume;
-        break;	
-      }
+  // for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
+    
+  //   ActuatorLineFASTInfo *ali = actuatorLineInfo_[iTurb];
 
-    }
+  //   if (MPI_COMM_NULL != ali->turbineComm) { // Act on this turbine only if I'm a part of the turbine MPI_Group
 
-    NaluEnv::self().naluOutput() << "Actuator Point " << np << ", " << "# elems " << elementVec.size() << ", " << " Type " << infoObject->nodeType_ << std::endl;
-    NaluEnv::self().naluOutput() << "  -Body force = " << forceSum[0] << " " << forceSum[1] << " " << forceSum[2] << " " << std::endl;
-    NaluEnv::self().naluOutput() << "  -Act. force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << std::endl;
-    NaluEnv::self().naluOutput() << "  -Ratio = " << forceSum[0]/ws_pointForce[0] << " " << forceSum[1]/ws_pointForce[1] << " " << forceSum[2]/ws_pointForce[2] << std::endl;
-    NaluEnv::self().naluOutput() << "  -gSum = " << gSum << std::endl;
+  //     std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
 
-    np=np+1;
-  }
 
-  // parallel assemble (contributions from ghosted and locally owned)
-  const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
-  stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldVec);
+  //     if ( ali->procId_ == NaluEnv::self().parallel_rank() ) {
+  // 	for (iterPoint  = ali->actuatorLinePointInfoMap_.begin();
+  // 	     iterPoint != ali->actuatorLinePointInfoMap_.end();
+  // 	     ++iterPoint) {
 
-  const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
-  stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldG);
+  // 	  // actuator line info object of interest
+  // 	  ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
+  // 	  size_t pointId = (*iterPoint).first ;
+
+  // 	  FAST.getForce(ws_pointForce, pointId, infoObject->globTurbId_);
+  // 	  if (FAST.isDebug() ) {
+  // 	    NaluEnv::self().naluOutput() << "Node " << pointId << " Type " << ali->nodeType_[pointId] << " Force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << " " << std::endl ;
+  // 	  }
+  // 	  for(int j=0; j < nDim; j++) ali->force_[pointId][j] = ws_pointForce[j];
+  // 	}
+  //     }
+
+  //     for (iterPoint  = ali->actuatorLinePointInfoMap_.begin();
+  // 	   iterPoint != ali->actuatorLinePointInfoMap_.end();
+  // 	   ++iterPoint) {
+	
+  // 	// actuator line info object of interest
+  // 	ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
+  // 	size_t pointId = (*iterPoint).first;
+  // 	//==========================================================================
+  // 	// extract the best element; compute drag given this velocity, property, etc
+  // 	// this point drag value will be used by all other elements below
+  // 	//==========================================================================
+	  
+  // 	// get the vector of elements
+  // 	std::vector<stk::mesh::Entity> elementVec = infoObject->elementVec_;
+	
+  // 	// Set up the necessary variables to check that forces/projection function are integrating up correctly.
+  // 	double gSum = 0.0;
+  // 	double forceSum[nDim];
+  // 	forceSum[0] = 0.0;
+  // 	forceSum[1] = 0.0;
+  // 	if (nDim>2){
+  // 	  forceSum[2] = 0.0;
+  // 	}
+	
+  // 	// iterate them and apply source term; gather coords
+  // 	for ( size_t k = 0; k < elementVec.size(); ++k ) {
+	  
+  // 	  stk::mesh::Entity elem = elementVec[k];
+	  
+  // 	  nodesPerElement = bulkData.num_nodes(elem);
+	  
+  // 	  // resize some work vectors
+  // 	  resize_std_vector(nDim, ws_coordinates_, elem, bulkData);
+	  
+  // 	  // gather coordinates
+  // 	  gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(elem), 
+  // 		       nodesPerElement);
+	  
+  // 	  // compute volume
+  // 	  double elemVolume = compute_volume(nDim, elem, bulkData);
+	  
+  // 	  // determine element centroid
+  // 	  compute_elem_centroid(nDim, &ws_elemCentroid[0], nodesPerElement);
+	  
+  // 	  // compute distance
+  // 	  const double distance = compute_distance(nDim, &ws_elemCentroid[0], &(infoObject->centroidCoords_[0]));
+	  
+  // 	  double gA = 0.0;
+	  
+  // 	  switch (infoObject->nodeType_) {
+  // 	  case HUB:
+  // 	    // project the force to this element centroid with projection function
+  // 	    gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
+  // 	    compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
+  // 	    // assemble nodal quantity; no LHS contribution here...
+  // 	    assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
+  // 				     0.0, *actuator_source, *actuator_source_lhs, *g, 0.0);
+  // 	    forceSum[0] += ws_elemForce[0]*elemVolume;
+  // 	    forceSum[1] += ws_elemForce[1]*elemVolume;
+  // 	    if (nDim > 2){
+  // 	      forceSum[2] += ws_elemForce[2]*elemVolume;
+  // 	    }
+  // 	    gSum += gA*elemVolume;
+  // 	    break;
+	    
+  // 	  case BLADE:
+  // 	    // project the force to this element centroid with projection function
+  // 	    gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
+  // 	    compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
+  // 	    // assemble nodal quantity; no LHS contribution here...
+  // 	    assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
+  // 				     gA, *actuator_source, *actuator_source_lhs, *g, 0.0);
+  // 	    forceSum[0] += ws_elemForce[0]*elemVolume;
+  // 	    forceSum[1] += ws_elemForce[1]*elemVolume;
+  // 	    if (nDim > 2){
+  // 	      forceSum[2] += ws_elemForce[2]*elemVolume;
+  // 	    }
+  // 	    gSum += gA*elemVolume;
+  // 	    break;
+	    
+  // 	  case TOWER:
+  // 	    // project the force to this element centroid with projection function
+  // 	    gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
+  // 	    compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
+  // 	    // assemble nodal quantity; no LHS contribution here...
+  // 	    assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, &ws_elemForce[0], ws_pointForceLHS,
+  // 				     gA, *actuator_source, *actuator_source_lhs, *g, 0.0);
+  // 	    forceSum[0] += ws_elemForce[0]*elemVolume;
+  // 	    forceSum[1] += ws_elemForce[1]*elemVolume;
+  // 	    if (nDim > 2){
+  // 	      forceSum[2] += ws_elemForce[2]*elemVolume;
+  // 	    }
+  // 	    gSum += gA*elemVolume;
+  // 	    break;	
+  // 	  }
+  // 	}
+
+  // 	NaluEnv::self().naluOutput() << "Actuator Point " << np << ", " << "# elems " << elementVec.size() << ", " << " Type " << infoObject->nodeType_ << std::endl;
+  // 	NaluEnv::self().naluOutput() << "  -Body force = " << forceSum[0] << " " << forceSum[1] << " " << forceSum[2] << " " << std::endl;
+  // 	NaluEnv::self().naluOutput() << "  -Act. force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << std::endl;
+  // 	NaluEnv::self().naluOutput() << "  -Ratio = " << forceSum[0]/ws_pointForce[0] << " " << forceSum[1]/ws_pointForce[1] << " " << forceSum[2]/ws_pointForce[2] << std::endl;
+  // 	NaluEnv::self().naluOutput() << "  -gSum = " << gSum << std::endl;
+	
+  // 	np=np+1;
+  //     }
+
+  //     // parallel assemble (contributions from ghosted and locally owned)
+  //     const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
+  //     stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldVec);
+      
+  //     const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
+  //     stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldG);
+  //   }
+    
+  // }
+
 }
-
-
 //--------------------------------------------------------------------------
 //-------- populate_candidate_elements -------------------------------------
 //--------------------------------------------------------------------------
@@ -886,45 +922,6 @@ ActuatorLineFAST::populate_candidate_procs()
 }
 
 //--------------------------------------------------------------------------
-//-------- determine_elems_to_ghost ----------------------------------------
-//--------------------------------------------------------------------------
-void
-ActuatorLineFAST::determine_elems_to_ghost()
-{
-  stk::mesh::BulkData & bulkData = realm_.bulk_data();
-
-  stk::search::coarse_search(boundingSphereVec_, boundingElementBoxVec_, searchMethod_, 
-                             NaluEnv::self().parallel_comm(), searchKeyPair_);
-
-  // lowest effort is to ghost elements to the owning rank of the point; can just as easily do the opposite
-  std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
-  for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
-
-    const uint64_t theBox = ii->second.id();
-    unsigned theRank = NaluEnv::self().parallel_rank();
-    const unsigned pt_proc = ii->first.proc();
-    const unsigned box_proc = ii->second.proc();
-    if ( (box_proc == theRank) && (pt_proc != theRank) ) {
-
-      // Send box to pt proc
-      
-      // find the element
-      stk::mesh::Entity theElemMeshObj = bulkData.get_entity(stk::topology::ELEMENT_RANK, theBox);
-      if ( !(bulkData.is_valid(theElemMeshObj)) )
-        throw std::runtime_error("no valid entry for element");
-
-      // new element to ghost counter
-      needToGhostCount_++;
-
-      // deal with elements to push back to be ghosted
-      stk::mesh::EntityProc theElemPair(theElemMeshObj, pt_proc);
-      elemsToGhost_.push_back(theElemPair);
-    }
-  }
-
-}
-
-//--------------------------------------------------------------------------
 //-------- create_actuator_line_point_info_map -----------------------------
 //--------------------------------------------------------------------------
 void
@@ -939,96 +936,68 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
 
   for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
     
-    const ActuatorLineFASTInfo *actuatorLineInfo = actuatorLineInfo_[iTurb];
-    
-    int processorId = FAST.get_procNo(iTurb);
-    if ( processorId == NaluEnv::self().parallel_rank() ) {
-      
-      // define a point that will hold the centroid
-      Point centroidCoords;
-    
-      // scratch array for coordinates and dummy array for velocity
-      double velocity[3] = {};
-      double currentCoords[3] = {};
+    ActuatorLineFASTInfo *ali = actuatorLineInfo_[iTurb];
 
-      // loop over all points for this turbine
-      const int nBlades = FAST.get_numBlades(iTurb); // Number of blades per turbine 
-      const int numForcePtsBlade = FAST.get_numForcePtsBlade(iTurb) ; // Number of nodes per blade 
-      const int numForcePtsTwr = FAST.get_numForcePtsTwr(iTurb) ; // Number of tower elements
-      const int numForcePts = FAST.get_numForcePts(iTurb); // Total number of elements 
-      //      actuatorLineInfo->numPoints_ = numVelPts ; // Can't change a const pointer
-      
-      if (! FAST.isDryRun() ) {
-	for(int iNode = 0; iNode < numForcePts; iNode++) {
-	  stk::search::IdentProc<uint64_t,int> theIdent(np, NaluEnv::self().parallel_rank());
-	  
-	  // set model coordinates from FAST
-	  // move the coordinates; set the velocity... may be better on the lineInfo object
-	  FAST.getForceNodeCoordinates(currentCoords, np, iTurb);
-	  if (FAST.isDebug() ) {
-	    NaluEnv::self().naluOutput() << "Vel Node " << np << " Position = " << currentCoords[0] << " " << currentCoords[1] << " " << currentCoords[2] << " " << std::endl ;
-	  }
-	  velocity[0] = 0.0;
-	  velocity[1] = 0.0;
-	  velocity[2] = 0.0;
+    if (MPI_COMM_NULL != ali->turbineComm_) { // Act on this turbine only if I'm a part of the turbine MPI_Group
 
-          double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
-	  
-	  for ( int j = 0; j < nDim; ++j )
-	    centroidCoords[j] = currentCoords[j];
-	  
-	  // create the bounding point sphere and push back
-	  boundingSphere theSphere( Sphere(centroidCoords, searchRadius), theIdent);
-	  boundingSphereVec_.push_back(theSphere);
-	  
-	  // create the point info and push back to map
-	  ActuatorLineFASTPointInfo *actuatorLinePointInfo 
-	    = new ActuatorLineFASTPointInfo(np, centroidCoords, 
-					    searchRadius, actuatorLineInfo->epsilon_,
-					    velocity, 
-					    FAST.getVelNodeType(iTurb, np),
-					    iTurb);
-	  actuatorLinePointInfoMap_[np] = actuatorLinePointInfo;
-	  
-	  np=np+1;
-	}
-
+      ali->procId_ = FAST.get_procNo(iTurb); 
+      int turbGroupProcId = 0; // id of the processor owning FAST in the turbine group comm
+      if ( ali->procId_ == NaluEnv::self().parallel_rank() ) {
+  	ali->numPoints_ = FAST.get_numForcePts(iTurb); // Total number of actuator points for the turbine
+  	MPI_Comm_rank(ali->turbineComm_, &turbGroupProcId);
       }
-      else {
-	NaluEnv::self().naluOutput() << "Proc " << NaluEnv::self().parallel_rank() << " glob iTurb " << iTurb << std::endl ;
+      MPI_Allreduce(&turbGroupProcId, &(ali->procIdGroup_), 1, MPI_INT, MPI_SUM, ali->turbineComm_) ; // Set the group processor id owning the turbine on all processors in the group
+      MPI_Bcast(&(ali->numPoints_), 1, MPI_INT, ali->procIdGroup_, ali->turbineComm_) ; 
+
+      ali->coords_ = create2DArray<double> (ali->numPoints_,3);
+      ali->velocity_ = create2DArray<double> (ali->numPoints_,3);
+      ali->force_ = create2DArray<double> (ali->numPoints_,3);
+      ali->nType_ = new int[ali->numPoints_];
+      ali->bestX_ = new minDist[ali->numPoints_];
+      ali->boundingSphereVec_.resize(ali->numPoints_);
+
+      if ( ali->procId_ == NaluEnv::self().parallel_rank() ) {
+	
+  	if (! FAST.isDryRun() ) {
+  	  // scratch array for coordinates
+  	  double currentCoords[3] = {};
+  	  for(int iNode = 0; iNode < ali->numPoints_; iNode++) {
+  	    FAST.getForceNodeCoordinates(currentCoords, np, iTurb);
+  	    for (int j=0; j < nDim; j++) ali->coords_[iNode][j] = currentCoords[j] ;
+  	    ali->nType_[iNode] = FAST.getVelNodeType(np, iTurb);
+  	    if (FAST.isDebug() ) {
+  	      NaluEnv::self().naluOutput() << "Vel Node " << np << " Position = " << currentCoords[0] << " " << currentCoords[1] << " " << currentCoords[2] << " " << std::endl ;
+  	    }
+  	  }
+  	}
       }
       
+      MPI_Bcast(ali->coords_[0], ali->numPoints_*nDim, MPI_DOUBLE, ali->procIdGroup_, ali->turbineComm_) ; 
+      MPI_Bcast(ali->nType_, ali->numPoints_*nDim, MPI_INT, ali->procIdGroup_, ali->turbineComm_) ; 
+
+      for(int iNode = 0; iNode < ali->numPoints_; iNode++) {
+  	// define a point that will hold the actuator point
+  	Point centroidCoords;
+  	for(int j=0; j < nDim; j++) centroidCoords[j] = ali->coords_[iNode][j];
+
+  	stk::search::IdentProc<uint64_t,int> theIdent(iNode, NaluEnv::self().parallel_rank());
+  	double searchRadius = ali->epsilon_.x_ * sqrt(log(1.0/0.001));
+
+  	// create the bounding point sphere and push back
+  	boundingSphere theSphere( Sphere(centroidCoords, searchRadius), theIdent);
+  	ali->boundingSphereVec_.push_back(theSphere);
+	
+  	// create the point info and push back to map
+  	ActuatorLineFASTPointInfo *actuatorLinePointInfo 
+  	  = new ActuatorLineFASTPointInfo(searchRadius);
+  	ali->actuatorLinePointInfoMap_[iNode] = actuatorLinePointInfo;
+  	}
+
     }
-
   }
 }
 
 
-//--------------------------------------------------------------------------
-//-------- manage_ghosting -------------------------------------------------
-//--------------------------------------------------------------------------
-void
-ActuatorLineFAST::manage_ghosting() 
-{
-  stk::mesh::BulkData & bulkData = realm_.bulk_data();
-  
-  // check for ghosting need
-  uint64_t g_needToGhostCount = 0;
-  stk::all_reduce_sum(NaluEnv::self().parallel_comm(), &needToGhostCount_, &g_needToGhostCount, 1);
-  if (g_needToGhostCount > 0) {
-    NaluEnv::self().naluOutputP0() << "ActuatorLineFAST alg will ghost a number of entities for velocity actuator nodes: "
-                                   << g_needToGhostCount  << std::endl;
-    bulkData.modification_begin();
-    bulkData.change_ghosting( *actuatorLineGhosting_, elemsToGhost_);
-    bulkData.modification_end();
-  }
-  else {
-    NaluEnv::self().naluOutputP0() << "ActuatorLineFAST alg will NOT ghost entities for velcity actuator nodes: " << std::endl;
-  }
-
-}
- 
- 
 //--------------------------------------------------------------------------
 //-------- complete_search -------------------------------------------------
 //--------------------------------------------------------------------------
@@ -1042,71 +1011,70 @@ ActuatorLineFAST::complete_search()
   // extract fields
   VectorFieldType *coordinates 
     = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
- 
-  // now proceed with the standard search
-  std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
-  for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
 
-    const uint64_t thePt = ii->first.id();
-    const uint64_t theBox = ii->second.id();
-    const unsigned theRank = NaluEnv::self().parallel_rank();
-    const unsigned pt_proc = ii->first.proc();
+  // for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
+    
+  //   ActuatorLineFASTInfo *ali = actuatorLineInfo_[iTurb];
 
-    // check if I own the point...
-    if ( theRank == pt_proc ) {
+  //   if (MPI_COMM_NULL != ali->turbineComm_) { // Act on this turbine only if I'm a part of the turbine MPI_Group
 
-      // yes, I own the point... 
+  //     stk::search::coarse_search(ali->boundingSphereVec_, boundingElementBoxVec_, searchMethod_, 
+  // 				 NaluEnv::self().parallel_comm(), searchKeyPair_, false); // Search only within this processor
 
-      // proceed as required; all elements should have already been ghosted via the coarse search
-      stk::mesh::Entity elem = bulkData.get_entity(stk::topology::ELEMENT_RANK, theBox);
-      if ( !(bulkData.is_valid(elem)) )
-        throw std::runtime_error("no valid entry for element");
+  //     // now proceed with the standard search
+  //     std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
+  //     for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
 
-      // find the point data structure
-      std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
-      iterPoint=actuatorLinePointInfoMap_.find(thePt);
-      if ( iterPoint == actuatorLinePointInfoMap_.end() )
-        throw std::runtime_error("no valid entry for actuatorLinePointInfoMap_");
+  // 	const uint64_t thePt = ii->first.id();
+  // 	const uint64_t theBox = ii->second.id();
+  // 	const unsigned theRank = NaluEnv::self().parallel_rank();
+  // 	const unsigned pt_proc = ii->first.proc();
+	
+
+  // 	// proceed as required; all elements should have already been ghosted via the coarse search
+  // 	stk::mesh::Entity elem = bulkData.get_entity(stk::topology::ELEMENT_RANK, theBox);
+  // 	if ( !(bulkData.is_valid(elem)) )
+  // 	  throw std::runtime_error("no valid entry for element");
+
+  // 	// find the point data structure
+  // 	std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
+  // 	iterPoint=ali->actuatorLinePointInfoMap_.find(thePt);
+  // 	if ( iterPoint == actuatorLinePointInfoMap_.end() )
+  // 	  throw std::runtime_error("no valid entry for actuatorLinePointInfoMap_");
       
-      // extract the point object and push back the element to either the best 
-      // candidate or the standard vector of elements
-      ActuatorLineFASTPointInfo *actuatorLinePointInfo = iterPoint->second;
+  // 	// extract the point object and push back the element to either the best 
+  // 	// candidate or the standard vector of elements
+  // 	ActuatorLineFASTPointInfo *actuatorLinePointInfo = iterPoint->second;
+	
+  // 	// extract topo and master element for this topo
+  // 	const stk::mesh::Bucket &theBucket = bulkData.bucket(elem);
+  // 	const stk::topology &elemTopo = theBucket.topology();
+  // 	MasterElement *meSCS = realm_.get_surface_master_element(elemTopo);
+  // 	const int nodesPerElement = meSCS->nodesPerElement_;
 
-      // extract topo and master element for this topo
-      const stk::mesh::Bucket &theBucket = bulkData.bucket(elem);
-      const stk::topology &elemTopo = theBucket.topology();
-      MasterElement *meSCS = realm_.get_surface_master_element(elemTopo);
-      const int nodesPerElement = meSCS->nodesPerElement_;
+  // 	// gather elemental coords
+  // 	std::vector<double> elementCoords(nDim*nodesPerElement);
+  // 	gather_field(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem), 
+  // 		     nodesPerElement);
 
-      // gather elemental coords
-      std::vector<double> elementCoords(nDim*nodesPerElement);
-      gather_field(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem), 
-                   nodesPerElement);
-
-      
-      // find isoparametric points
-      std::vector<double> isoParCoords(nDim);
-      const double nearestDistance = meSCS->isInElement(&elementCoords[0],
-                                                        &(actuatorLinePointInfo->centroidCoords_[0]),
-                                                        &(isoParCoords[0]));
- 
-
-      // save off best element and its isoparametric coordinates for this point
-      if ( nearestDistance < actuatorLinePointInfo->bestX_ ) {
-        actuatorLinePointInfo->bestX_ = nearestDistance;
-        actuatorLinePointInfo->isoParCoords_ = isoParCoords;
-        actuatorLinePointInfo->bestElem_ = elem;
-      }
-        actuatorLinePointInfo->elementVec_.push_back(elem);
-    }
-    else {
-      // not this proc's issue
-    }
-  }
-
-
+  // 	// find isoparametric points
+  // 	std::vector<double> isoParCoords(nDim);
+  // 	const double nearestDistance = meSCS->isInElement(&elementCoords[0],
+  // 							  &(actuatorLinePointInfo->centroidCoords_[0]),
+  // 							  &(isoParCoords[0]));
+	
+  // 	// save off best element and its isoparametric coordinates for this point
+  // 	if ( nearestDistance < actuatorLinePointInfo->bestX_ ) {
+  // 	  actuatorLinePointInfo->bestX_ = nearestDistance;
+  // 	  actuatorLinePointInfo->isoParCoords_ = isoParCoords;
+  // 	  actuatorLinePointInfo->bestElem_ = elem;
+  // 	}
+  //       actuatorLinePointInfo->elementVec_.push_back(elem);
+  //     }
+  //   }
+  // }
+  
 }
-
 
 //--------------------------------------------------------------------------
 //-------- resize_std_vector -----------------------------------------------

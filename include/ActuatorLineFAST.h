@@ -15,10 +15,28 @@
 // FAST c interface
 #include "FAST_cInterface.h"
 
+
+
 namespace sierra{
 namespace nalu{
 
 class Realm;
+
+struct minDist {
+  double value;
+  int id;
+};
+
+// class that holds all of the search action... for each actuator point
+class ActuatorLineFASTPointInfo {
+ public:
+  ActuatorLineFASTPointInfo(double searchRadius);
+  ~ActuatorLineFASTPointInfo();
+  double searchRadius_;
+  stk::mesh::Entity bestElem_;
+  std::vector<double> isoParCoords_;
+  std::vector<stk::mesh::Entity> elementVec_;
+};
 
 class ActuatorLineFASTInfo {
 public:
@@ -26,35 +44,31 @@ public:
   ~ActuatorLineFASTInfo();
 
   // for each type of probe, e.g., line of site, hold some stuff
-  int processorId_;
-  int numPoints_;
-  std::string turbineName_;
-  Coordinates epsilon_;
-};
-
-// class that holds all of the action... for each point, hold the current location and other useful info
-class ActuatorLineFASTPointInfo {
- public:
-  ActuatorLineFASTPointInfo(
-			    size_t localId, Point centroidCoords, double searchRadius, Coordinates epsilon, double *velocity, ActuatorNodeType nType, size_t globTurbId);
-  ~ActuatorLineFASTPointInfo();
+  int procId_;  // Id of the processor owning FAST in global comm
   size_t globTurbId_; // Global turbine number
-  size_t localId_;
-  Point centroidCoords_;
-  double searchRadius_;
+  std::string turbineName_;
+
+  int procIdGroup_; // Id of the processor owning FAST in turbine group comm
+  MPI_Group turbineGroup_;
+  MPI_Comm turbineComm_;
+
+  int numPoints_;
   Coordinates epsilon_;
-  double bestX_;
-  stk::mesh::Entity bestElem_;
 
-  ActuatorNodeType nodeType_;
-  // mesh motion specifics
-  double velocity_[3];
+  double ** coords_; // Coordinates of the actuator points
+  double ** velocity_; // Sampled velocity at the actuator points
+  double ** force_; // Body force at the actuator points
+  int * nType_; // Actuator node type of each actuator point
 
-  std::vector<double> isoParCoords_;
-  std::vector<stk::mesh::Entity> elementVec_;
+  minDist * bestX_; // Distance of closest element to each actuator point
+  
+  std::map<size_t, ActuatorLineFASTPointInfo *> actuatorLinePointInfoMap_; // Map of point info objects
+  // bounding box data types for stk_search */
+  std::vector<boundingSphere> boundingSphereVec_;
+
 };
- 
- class ActuatorLineFAST: public Actuator
+
+class ActuatorLineFAST: public Actuator
 {
 public:
   
@@ -87,18 +101,6 @@ public:
 
   // fill in the map that will hold point and ghosted elements
   void create_actuator_line_point_info_map();
-
-  // figure out the set of elements that belong in the custom ghosting data structure
-  void determine_elems_to_ghost();
-
-  // deal with custom ghosting
-  void manage_ghosting();
-
-  // manage rotation, now only in the y-z plane
-  void set_current_coordinates(
-    double *lineCentroid, double *centroidCoords, const double &omega, const double &currentTime);
-  void set_current_velocity(
-    double *lineCentroid, const double *centroidCoords, double *velocity, const double &omega);
 
   // populate vector of elements
   void complete_search();
@@ -189,35 +191,23 @@ public:
   // type of stk search
   stk::search::SearchMethod searchMethod_;
   
-  // custom ghosting
-  stk::mesh::Ghosting *actuatorLineGhosting_;
-  // how many elements to ghost?
-  uint64_t needToGhostCount_;
-  stk::mesh::EntityProcVec elemsToGhost_;
-
   // does the actuator line move?
   bool actuatorLineMotion_;
-
-  // everyone needs pi
-  const double pi_;
 
   // save off product of search
   std::vector<std::pair<theKey, theKey> > searchKeyPair_;
 
   // bounding box data types for stk_search */
-  std::vector<boundingSphere> boundingSphereVec_;
   std::vector<boundingElementBox> boundingElementBoxVec_;
   std::vector<boundingSphere> boundingHubSphereVec_;
+  std::vector<boundingSphere> boundingHubBigSphereVec_;
   std::vector<boundingElementBox> boundingProcBoxVec_;
 
   // target names for set of bounding boxes
   std::vector<std::string> searchTargetNames_;
  
-  // vector of averaging information
+  // vector of ActuatorLineFASTInfo objects
   std::vector<ActuatorLineFASTInfo *> actuatorLineInfo_; 
-
-  // map of point info objects
-  std::map<size_t, ActuatorLineFASTPointInfo *> actuatorLinePointInfoMap_;
 
   // scratch space
   std::vector<double> ws_coordinates_;
@@ -228,6 +218,8 @@ public:
 
   // FAST cInterface handle
   FAST_cInterface FAST;
+  
+  MPI_Group worldMPIGroup_;
 
 };
 
