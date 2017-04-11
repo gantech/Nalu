@@ -185,6 +185,11 @@ public:
     stk::mesh::FieldBase &g,
     const double &lhsFac);
 
+  // check sampled velocity against wind energy taylor vortex function
+  bool checkVelocityWindEnergyTaylorVortex(
+    const double * coords,
+    double * vel);
+
   // hold the realm
   Realm &realm_;
 
@@ -194,6 +199,9 @@ public:
   // does the actuator line move?
   bool actuatorLineMotion_;
 
+  // Is this processor under the influence of any turbine?
+  bool partOfAnyTurbine_;
+  
   // save off product of search
   std::vector<std::pair<theKey, theKey> > searchKeyPair_;
 
