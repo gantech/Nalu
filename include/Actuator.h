@@ -46,6 +46,7 @@ class Realm;
  
 class Actuator
 {
+    
 public:
   
   Actuator(

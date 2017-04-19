@@ -59,6 +59,7 @@ public:
   double ** velocity_; // Sampled velocity at the actuator points
   double ** force_; // Body force at the actuator points
   int * nType_; // Actuator node type of each actuator point
+  double * gSum_; // Coordinates of the actuator points
 
   minDist * bestX_; // Distance of closest element to each actuator point
   
@@ -229,6 +230,14 @@ public:
   
   MPI_Group worldMPIGroup_;
 
+  double timerExecute_; // Keep track of total time spent in actuator line execute function;
+  double timerUpdate_; // Keep track of total time spent in actuator line update function;
+  double timerVelSearch_; // Keep track of total time spent in velocity sampling
+  double timerForceSpread_; // Keep track of total time spent in body force spreading
+  double timerCALPIM_; // Keep track of time spent in create_actuator_line_point_info_map
+  double timerPCE_; // Keep track of total time spent in populate_candidate_elements
+  double timerCompleteSearch_ ; // Keep track of total time spent in complete_search
+  double timerCoarseSearch_ ; // Keep track of total time spent in complete_search
 };
 
 

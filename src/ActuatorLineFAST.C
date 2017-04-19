@@ -88,7 +88,8 @@ ActuatorLineFASTInfo::ActuatorLineFASTInfo()
     coords_(NULL),
     velocity_(NULL),
     force_(NULL),
-    nType_(NULL)
+    nType_(NULL),
+    gSum_(NULL)
 {
   boundingSphereVec_.resize(0);
   actuatorLinePointInfoMap_.clear();
@@ -106,6 +107,7 @@ ActuatorLineFASTInfo::~ActuatorLineFASTInfo()
     delete2DArray(velocity_);
     delete2DArray(force_);
     delete [] nType_ ;
+    delete [] gSum_ ;
     delete [] bestX_ ;
   }
 
@@ -154,7 +156,15 @@ ActuatorLineFAST::ActuatorLineFAST(
     realm_(realm),
     searchMethod_(stk::search::BOOST_RTREE),
     actuatorLineMotion_(false),
-    partOfAnyTurbine_(false)
+    partOfAnyTurbine_(false),
+    timerExecute_(0.0),
+    timerUpdate_(0.0),
+    timerVelSearch_(0.0),
+    timerForceSpread_(0.0),
+    timerCALPIM_(0.0),
+    timerPCE_(0.0),
+    timerCompleteSearch_(0.0),
+    timerCoarseSearch_(0.0)
 {
   // load the data
   load(node);
@@ -198,6 +208,15 @@ ActuatorLineFAST::ActuatorLineFAST(
 //--------------------------------------------------------------------------
 ActuatorLineFAST::~ActuatorLineFAST()
 {
+
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->execute function = " << timerExecute_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->update function = " << timerUpdate_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->vel search = " << timerVelSearch_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->force spread = " << timerForceSpread_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->create_actuator_line_point_info_map = " << timerCALPIM_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->populate_candidate_elements = " << timerPCE_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->complete_search = " << timerCompleteSearch_ << "s" << std::endl;
+  NaluEnv::self().naluOutput() << "Total time taken for Actuator->coarse_search = " << timerCoarseSearch_ << "s" << std::endl;
 
   FAST.end(); // Call destructors in FAST_cInterface
 
@@ -397,6 +416,7 @@ ActuatorLineFAST::allocateTurbinesToProcs()
     for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
       turbineGroupProcs[iProc] = ii->second.proc();
       if (NaluEnv::self().parallel_rank() == turbineGroupProcs[iProc]) partOfAnyTurbine_ = true; 
+      NaluEnv::self().naluOutput() << "turbine: " << iTurb << " involves proc: " <<  turbineGroupProcs[iProc] << std::endl ;
       iProc++;
     }
     MPI_Group_incl(worldMPIGroup_, nTurbineGroupProcs, turbineGroupProcs, &(actuatorLineInfo->turbineGroup_) );
@@ -455,15 +475,24 @@ ActuatorLineFAST::update()
   boundingElementBoxVec_.clear();
   searchKeyPair_.clear();
 
+  double timeA = NaluEnv::self().nalu_time();
+
   // set all of the candidate elements in the search target names
   if (partOfAnyTurbine_)
     populate_candidate_elements();
-  
+
+  double timePCE = NaluEnv::self().nalu_time();
+  timerPCE_ += (timePCE - timeA) ;
+
   // create the ActuatorLineFASTPointInfo
   create_actuator_line_point_info_map();
 
   // complete filling in the set of elements connected to the centroid
   complete_search();
+
+  double timeB = NaluEnv::self().nalu_time();
+  timerUpdate_ += (timeB - timeA);
+
 }
 
 
@@ -473,6 +502,9 @@ ActuatorLineFAST::update()
 void
 ActuatorLineFAST::execute()
 {
+
+  double timeA = NaluEnv::self().nalu_time();
+
   // meta/bulk data and nDim
   stk::mesh::MetaData & metaData = realm_.meta_data();
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
@@ -565,8 +597,9 @@ ActuatorLineFAST::execute()
   		       nodesPerElement);
   	  gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem), 
   				  nodesPerElement);
-  	  gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem), 
-  				  nodesPerElement);
+	  // TODO: Fix gather field of viscosity 
+	  //  	  gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem), 
+				  //  				  nodesPerElement);
   	  gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem), 
   				  nodesPerElement);
 	  
@@ -612,7 +645,8 @@ ActuatorLineFAST::execute()
   	  }
 	  
   	  //Step FAST
-  	  FAST.step();
+	  for(int j=0; j < 10; j++) FAST.step();
+
   	}
       }
 
@@ -620,10 +654,15 @@ ActuatorLineFAST::execute()
 
     }
   }
+
+  double tVS = NaluEnv::self().nalu_time();
+  timerVelSearch_ += (tVS - timeA);
  
   // Are the actuator points moving?
   if ( actuatorLineMotion_ )
     update();
+
+  double tFS = NaluEnv::self().nalu_time();
 
   for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
     
@@ -664,12 +703,14 @@ ActuatorLineFAST::execute()
   	// extract the best element; compute drag given this velocity, property, etc
   	// this point drag value will be used by all other elements below
   	//==========================================================================
-	  
+
+	for(int j=0; j < nDim; j++) ws_pointForce[j] = ali->force_[pointId][j];
+
   	// get the vector of elements
   	std::vector<stk::mesh::Entity> elementVec = infoObject->elementVec_;
 	
   	// Set up the necessary variables to check that forces/projection function are integrating up correctly.
-  	double gSum = 0.0;
+  	double gSumLoc = 0.0;
   	double forceSum[nDim];
   	forceSum[0] = 0.0;
   	forceSum[1] = 0.0;
@@ -718,7 +759,7 @@ ActuatorLineFAST::execute()
   	    if (nDim > 2){
   	      forceSum[2] += ws_elemForce[2]*elemVolume;
   	    }
-  	    gSum += gA*elemVolume;
+  	    gSumLoc += gA*elemVolume;
   	    break;
 	    
   	  case BLADE:
@@ -733,7 +774,7 @@ ActuatorLineFAST::execute()
   	    if (nDim > 2){
   	      forceSum[2] += ws_elemForce[2]*elemVolume;
   	    }
-  	    gSum += gA*elemVolume;
+  	    gSumLoc += gA*elemVolume;
   	    break;
 	    
   	  case TOWER:
@@ -748,29 +789,35 @@ ActuatorLineFAST::execute()
   	    if (nDim > 2){
   	      forceSum[2] += ws_elemForce[2]*elemVolume;
   	    }
-  	    gSum += gA*elemVolume;
+  	    gSumLoc += gA*elemVolume;
   	    break;	
   	  }
   	}
 
-  	NaluEnv::self().naluOutput() << "Actuator Point " << pointId << ", " << "# elems " << elementVec.size() << ", " << " Type " << ali->nType_[pointId] << std::endl;
-  	NaluEnv::self().naluOutput() << "  -Body force = " << forceSum[0] << " " << forceSum[1] << " " << forceSum[2] << " " << std::endl;
-  	NaluEnv::self().naluOutput() << "  -Act. force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << std::endl;
-  	NaluEnv::self().naluOutput() << "  -Ratio = " << forceSum[0]/ws_pointForce[0] << " " << forceSum[1]/ws_pointForce[1] << " " << forceSum[2]/ws_pointForce[2] << std::endl;
-  	NaluEnv::self().naluOutput() << "  -gSum = " << gSum << std::endl;
+	MPI_Allreduce(&gSumLoc, &(ali->gSum_[pointId]), 1, MPI_DOUBLE, MPI_SUM, ali->turbineComm_) ;
+
+  	// NaluEnv::self().naluOutput() << "Actuator Point " << pointId << ", " << "# elems " << elementVec.size() << ", " << " Type " << ali->nType_[pointId] << std::endl;
+  	// NaluEnv::self().naluOutput() << "  -Body force = " << forceSum[0] << " " << forceSum[1] << " " << forceSum[2] << " " << std::endl;
+  	// NaluEnv::self().naluOutput() << "  -Act. force = " << ws_pointForce[0] << " " << ws_pointForce[1] << " " << ws_pointForce[2] << std::endl;
+  	// NaluEnv::self().naluOutput() << "  -Ratio = " << forceSum[0]/ws_pointForce[0] << " " << forceSum[1]/ws_pointForce[1] << " " << forceSum[2]/ws_pointForce[2] << std::endl;
+  	// NaluEnv::self().naluOutput() << "  -gSum = " << ali->gSum_[pointId] << std::endl;
 	
       }
 
-      // // parallel assemble (contributions from ghosted and locally owned)
-      // const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
-      // stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldVec);
-      
-      // const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
-      // stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldG);
     }
     
   }
 
+  // parallel assemble (contributions from ghosted and locally owned)
+  //      const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
+  stk::mesh::parallel_sum(bulkData, {actuator_source});
+  
+  //      const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
+  stk::mesh::parallel_sum(bulkData, {g});
+  
+  double timeB = NaluEnv::self().nalu_time();
+  timerExecute_ += (timeB - timeA);
+  timerForceSpread_ += (timeB - tFS);
 }
 //--------------------------------------------------------------------------
 //-------- populate_candidate_elements -------------------------------------
@@ -939,6 +986,9 @@ ActuatorLineFAST::populate_candidate_procs()
 void
 ActuatorLineFAST::create_actuator_line_point_info_map() {
 
+
+  double timeA = NaluEnv::self().nalu_time();
+
   const double currentTime = realm_.get_current_time();
 
   stk::mesh::MetaData & metaData = realm_.meta_data(); 
@@ -966,6 +1016,7 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
       ali->velocity_ = create2DArray<double> (ali->numPoints_,3);
       ali->force_ = create2DArray<double> (ali->numPoints_,3);
       ali->nType_ = new int[ali->numPoints_];
+      ali->gSum_ = new double[ali->numPoints_];
       ali->bestX_ = new minDist[ali->numPoints_];
 
       if ( ali->procId_ == NaluEnv::self().parallel_rank() ) {
@@ -1010,6 +1061,10 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
 
     }
   }
+
+  double timeB = NaluEnv::self().nalu_time();
+  timerCALPIM_ += (timeB - timeA);
+
 }
 
 
@@ -1019,6 +1074,9 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
 void
 ActuatorLineFAST::complete_search()
 {
+
+  double timeA = NaluEnv::self().nalu_time();
+
   stk::mesh::MetaData & metaData = realm_.meta_data();
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
   const int nDim = metaData.spatial_dimension();
@@ -1036,8 +1094,12 @@ ActuatorLineFAST::complete_search()
       ali->bestX_[iNode].id = -1; // Initialize it a negative number
     }
 
+    double timeCSB = NaluEnv::self().nalu_time();
     stk::search::coarse_search(ali->boundingSphereVec_, boundingElementBoxVec_, searchMethod_, 
 			       NaluEnv::self().parallel_comm() , searchKeyPair_); 
+    
+    double timeCSA = NaluEnv::self().nalu_time();
+    timerCoarseSearch_ += (timeCSA - timeCSB) ;
 
     if (MPI_COMM_NULL != ali->turbineComm_) { // Act on this turbine only if I'm a part of the turbine MPI_Group
 
@@ -1116,6 +1178,9 @@ ActuatorLineFAST::complete_search()
     }
   }
   
+  double timeB = NaluEnv::self().nalu_time();
+  timerCompleteSearch_ += (timeB - timeA);
+
 }
 
 //--------------------------------------------------------------------------
