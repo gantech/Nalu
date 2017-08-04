@@ -70,6 +70,9 @@
 #ifdef NALU_USES_OPENFAST
 #include <ActuatorLineFAST.h>
 #endif
+#ifdef NALU_USES_SMD
+#include <ActuatorLineSMD.h>
+#endif
 
 #include <ABLForcingAlgorithm.h>
 
@@ -569,6 +572,12 @@ Realm::look_ahead_and_creation(const YAML::Node & node)
       case ActuatorType::ActLineFAST : {
 	actuator_ =  new ActuatorLineFAST(*this, *foundActuator[0]);
 	break;
+      }
+#endif
+#ifdef NALU_USES_SMD
+      case ActuatorType::ActLineSMD : {
+          actuator_ =  new ActuatorLineSMD(*this, *foundActuator[0]);
+          break;
       }
 #endif
       case ActuatorType::ActDisc : {

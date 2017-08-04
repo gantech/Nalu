@@ -11,7 +11,10 @@ cmake_minimum_required (VERSION 2.8.11)
 #  THESE PATHS MAY NEED TO BE CHANGED DEPENDING ON WHERE THEY ARE STORED!!!
 #
 option(NALU_USES_OPENFAST
-       "Use OPENFAST tpl to get actuator line positions and forces" ON)
+       "Use OPENFAST tpl to get actuator line positions and forces" OFF)
+
+option(NALU_USES_SMD
+       "Use SMD tpl to get actuator line position and force for spring-mass-damper system" OFF)
 
 SET(CMAKE_FIND_LIBRARY_PREFIXES lib)
 SET(CMAKE_FIND_LIBRARY_SUFFIXES a)
@@ -29,8 +32,16 @@ if (NALU_USES_OPENFAST)
    MESSAGE("   OPENFAST Libraries =  ${OpenFAST_LIBRARIES}")
    include_directories(${OpenFAST_INCLUDE_DIRS})
    add_definitions("-DNALU_USES_OPENFAST")
-
 endif (NALU_USES_OPENFAST)
+
+if (NALU_USES_SMD)
+   SET(CMAKE_PREFIX_PATH ${SMD_DIR} ${CMAKE_PREFIX_PATH})
+   find_package(SMD REQUIRED)
+   MESSAGE("   SMD Include dir =  ${SMD_INCLUDE_DIRS}")
+   MESSAGE("   SMD Libraries =  ${SMD_LIBRARIES}")
+   include_directories(${SMD_INCLUDE_DIRS})
+   add_definitions("-DNALU_USES_SMD")
+endif (NALU_USES_SMD)
 
 # This needs to be cleaned up
 find_library(YAML_LIBRARY NAMES libyaml-cpp.a PATHS ${YAML_DIR}/lib )
@@ -113,6 +124,10 @@ target_link_libraries(nalu ${YAML_LIBRARY})
 if (NALU_USES_OPENFAST)
    target_link_libraries(nalu ${OpenFAST_LIBRARIES} ${OpenFAST_CPP_LIBRARIES})
 endif (NALU_USES_OPENFAST)
+
+if (NALU_USES_SMD)
+   target_link_libraries(nalu ${SMD_LIBRARIES})
+endif (NALU_USES_SMD)
 
 file (GLOB UNIT_TESTS_SOURCES unit_tests/*.C unit_tests/*/*.C)
 

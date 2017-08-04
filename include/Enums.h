@@ -205,6 +205,7 @@ enum ActuatorType {
   ActLineFAST = 1,
   ActDisc = 2,
   ActSector = 3,
+  ActLineSMD = 4,
   ActuatorType_END
 };
 
