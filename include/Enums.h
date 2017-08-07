@@ -209,7 +209,7 @@ enum ActuatorType {
   ActuatorType_END
 };
 
- static std::map<std::string, ActuatorType> ActuatorTypeMap = { {"ActLinePointDrag",ActuatorType::ActLinePointDrag}, {"ActLineFAST",ActuatorType::ActLineFAST}, {"ActDisc",ActuatorType::ActDisc}, {"ActSector",ActuatorType::ActSector}};
+ static std::map<std::string, ActuatorType> ActuatorTypeMap = { {"ActLinePointDrag",ActuatorType::ActLinePointDrag}, {"ActLineFAST",ActuatorType::ActLineFAST}, {"ActDisc",ActuatorType::ActDisc}, {"ActSector",ActuatorType::ActSector}, {"ActLineSMD",ActuatorType::ActLineSMD} };
 
 } // namespace nalu
 } // namespace Sierra

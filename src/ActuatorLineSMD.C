@@ -200,8 +200,19 @@ ActuatorLineSMD::load(
     get_required(y_actuatorLine, "n_every_checkpoint", i_smd.n_every_checkpoint);
     get_required(y_actuatorLine, "dt_smd", i_smd.dt);
     get_required(y_actuatorLine, "t_max", i_smd.t_max); // t_max is the total duration to which you want to run SMD. 
+
+    // Only one SMD for now
+    ActuatorLineSMDInfo *actuatorLineInfo = new ActuatorLineSMDInfo();
+    actuatorLineInfo_.push_back(actuatorLineInfo);
+
+    const YAML::Node epsilon = y_actuatorLine["epsilon"];
+    if ( epsilon )
+      actuatorLineInfo->epsilon_ = epsilon.as<Coordinates>() ;
+    else
+      throw std::runtime_error("ActuatorLineSMD: lacking epsilon vector");
     
     p_smd.setInputs(i_smd);
+
   }
 }
     
