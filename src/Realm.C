@@ -61,6 +61,7 @@
 #include <SolutionNormPostProcessing.h>
 #include <TurbulenceAveragingPostProcessing.h>
 #include <DataProbePostProcessing.h>
+#include <ABLPostProcessingAlgorithm.h>
 
 // actuator line
 #include <ActuatorLine.h>
@@ -187,6 +188,7 @@ namespace nalu{
     solutionNormPostProcessing_(NULL),
     turbulenceAveragingPostProcessing_(NULL),
     dataProbePostProcessing_(NULL),
+    ablPostProcessingAlg_(NULL),   
     actuatorLine_(NULL),
     ablForcingAlg_(NULL),
     nodeCount_(0),
@@ -302,6 +304,9 @@ Realm::~Realm()
 
   // Delete abl forcing pointer
   if (NULL != ablForcingAlg_) delete ablForcingAlg_;
+
+  // Delete abl postprocessing pointer
+  if (NULL != ablPostProcessingAlg_) delete ablPostProcessingAlg_;
 }
 
 void
@@ -559,6 +564,13 @@ Realm::look_ahead_and_creation(const YAML::Node & node)
     const YAML::Node ablNode = node["abl_forcing"];
     ablForcingAlg_ = new ABLForcingAlgorithm(*this, ablNode);
   }
+
+  // ABL postprocessing
+  if (node["abl_postprocessing"]) {
+      const YAML::Node ablppNode = node["abl_postprocessing"];
+      ablPostProcessingAlg_ = new ABLPostProcessingAlgorithm(*this, ablppNode);
+  }
+
 }
   
 //--------------------------------------------------------------------------
@@ -873,6 +885,9 @@ Realm::setup_post_processing_algorithms()
   if ( NULL != ablForcingAlg_)
     ablForcingAlg_->setup();
 
+  if ( NULL != ablPostProcessingAlg_)
+    ablPostProcessingAlg_->setup();
+  
   // check for norm nodal fields
   if ( NULL != solutionNormPostProcessing_ )
     solutionNormPostProcessing_->setup();
@@ -2359,9 +2374,14 @@ Realm::initialize_post_processing_algorithms()
     actuatorLine_->initialize();
   }
 
+  if ( NULL != ablPostProcessingAlg_) {
+    ablPostProcessingAlg_->initialize();
+  }
+
   if ( NULL != ablForcingAlg_) {
     ablForcingAlg_->initialize();
   }
+  
 }
 
 //--------------------------------------------------------------------------
@@ -4377,6 +4397,10 @@ Realm::post_converged_work()
 
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->execute();
+
+  if ( NULL != ablPostProcessingAlg_ )
+    ablPostProcessingAlg_->execute();
+  
 }
 
 //--------------------------------------------------------------------------
@@ -4722,7 +4746,12 @@ Realm::get_inactive_selector()
     ? (ablForcingAlg_->inactive_selector())
     : stk::mesh::Selector());
   
-  return inactiveOverSetSelector | inactiveDataProbeSelector | inactiveABLForcing;
+  stk::mesh::Selector inactiveABLPostProcessing = (
+      ( NULL != ablPostProcessingAlg_)
+      ? (ablPostProcessingAlg_->inactive_selector())
+      : stk::mesh::Selector());
+  
+  return inactiveOverSetSelector | inactiveDataProbeSelector | inactiveABLForcing | inactiveABLPostProcessing;
 }
 
 //--------------------------------------------------------------------------

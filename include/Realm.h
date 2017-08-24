@@ -73,6 +73,7 @@ class TurbulenceAveragingPostProcessing;
 class DataProbePostProcessing;
 class ActuatorLine;
 class ABLForcingAlgorithm;
+class ABLPostProcessingAlgorithm;
 
 class TensorProductQuadratureRule;
 class LagrangeBasis;
@@ -415,6 +416,7 @@ class Realm {
   DataProbePostProcessing *dataProbePostProcessing_;
   ActuatorLine *actuatorLine_;
   ABLForcingAlgorithm *ablForcingAlg_;
+  ABLPostProcessingAlgorithm *ablPostProcessingAlg_;  
 
   std::vector<Algorithm *> propertyAlg_;
   std::map<PropertyIdentifier, ScalarFieldType *> propertyMap_;
