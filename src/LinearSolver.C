@@ -183,7 +183,8 @@ int
 TpetraLinearSolver::solve(
   Teuchos::RCP<LinSys::Vector> sln,
   int & iters,
-  double & finalResidNrm)
+  double & finalResidNrm,
+  bool isFinalOuterIter)
 {
   ThrowRequire(!sln.is_null());
 
@@ -206,6 +207,15 @@ TpetraLinearSolver::solve(
   }
   time += NaluEnv::self().nalu_time();
   timerPrecond_ += time;
+
+  auto params = config_->params();
+  if (isFinalOuterIter) {
+    params->set("Convergence Tolerance", config_->finalTolerance());
+  } else {
+    params->set("Convergence Tolerance", config_->tolerance());
+  }
+
+  solver_->setParameters(params);
 
   problem_->setProblem();
   solver_->solve();
