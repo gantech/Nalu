@@ -19,7 +19,7 @@ namespace nalu {
 class Realm;
 class Transfer;
 class Transfers;
-
+class SpatialAveragingAlgorithm;
 /**
  * \brief ABL Forcing Source terms for Momentum and Temperature equations
  *
@@ -47,6 +47,8 @@ public:
 
   ABLPostProcessingAlgorithm(Realm&, const YAML::Node&);
 
+  ABLPostProcessingAlgorithm(Realm&, const YAML::Node&, SpatialAveragingAlgorithm& spatialAvg);
+  
   ~ABLPostProcessingAlgorithm();
 
   //! Parse input file for user options and initialize
@@ -90,19 +92,14 @@ private:
   //! on user input.
   void register_fields();
 
-  //! Create transfer that handles mapping of velocity and temperature from
-  //! fluidRealm to the planar nodesets.
-  void create_transfers();
-
-  void populate_transfer_data(std::string, const std::vector<std::string>&);
-
-  //! Helper method to compute the average velocity on a z-planes
-  void calc_vel_stats();
-
-  void calc_temp_stats();
+  //! Helper method to compute the statistics on z-planes
+  void calc_stats();
 
   //! Reference to Realm
   Realm& realm_;
+
+  //! Pointer to SpatialAveragingAlgorithm
+  SpatialAveragingAlgorithm * spatialAvg_;
   
   //! Heights where velocity information is provided
   std::vector<double> heights_; // Array of shape [num_Uheights]

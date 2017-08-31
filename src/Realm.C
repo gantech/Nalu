@@ -61,6 +61,7 @@
 #include <SolutionNormPostProcessing.h>
 #include <TurbulenceAveragingPostProcessing.h>
 #include <DataProbePostProcessing.h>
+#include <SpatialAveragingAlgorithm.h>
 #include <ABLPostProcessingAlgorithm.h>
 
 // actuator line
@@ -188,6 +189,7 @@ namespace nalu{
     solutionNormPostProcessing_(NULL),
     turbulenceAveragingPostProcessing_(NULL),
     dataProbePostProcessing_(NULL),
+    spatialAveraging_(NULL),
     ablPostProcessingAlg_(NULL),   
     actuatorLine_(NULL),
     ablForcingAlg_(NULL),
@@ -307,6 +309,9 @@ Realm::~Realm()
 
   // Delete abl postprocessing pointer
   if (NULL != ablPostProcessingAlg_) delete ablPostProcessingAlg_;
+
+  // Delete spatial averaging pointer
+  if (NULL != spatialAveraging_) delete spatialAveraging_;
 }
 
 void
@@ -557,6 +562,12 @@ Realm::look_ahead_and_creation(const YAML::Node & node)
     if ( foundActuatorLine.size() != 1 )
       throw std::runtime_error("look_ahead_and_create::error: Too many actuator line blocks");
     actuatorLine_ =  new ActuatorLine(*this, *foundActuatorLine[0]);
+  }
+
+  // Spatial averaging postprocessing
+  if (node["spatial_averaging"]) {
+      const YAML::Node spatialAvgNode = node["spatial_averaging"];
+      spatialAveraging_ = new SpatialAveragingAlgorithm(*this, spatialAvgNode);
   }
 
   // ABL Forcing parameters
@@ -878,6 +889,10 @@ Realm::setup_post_processing_algorithms()
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->setup();
 
+  // check for spatial averaging
+  if ( NULL != spatialAveraging_ )
+    spatialAveraging_->setup();
+  
   // check for actuator line
   if ( NULL != actuatorLine_ )
     actuatorLine_->setup();
@@ -2368,6 +2383,10 @@ Realm::initialize_post_processing_algorithms()
   // check for data probes
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->initialize();
+
+  if ( NULL != spatialAveraging_) {
+      spatialAveraging_->initialize();
+  }
 
   // check for actuator line... probably a better place for this
   if ( NULL != actuatorLine_ ) {
@@ -4398,6 +4417,9 @@ Realm::post_converged_work()
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->execute();
 
+  if ( NULL != spatialAveraging_ )
+      spatialAveraging_->execute();
+  
   if ( NULL != ablPostProcessingAlg_ )
     ablPostProcessingAlg_->execute();
   

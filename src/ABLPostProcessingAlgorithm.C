@@ -1,5 +1,6 @@
 
 #include "ABLPostProcessingAlgorithm.h"
+#include "SpatialAveragingAlgorithm.h"
 #include "Realm.h"
 #include "xfer/Transfer.h"
 #include "xfer/Transfers.h"
@@ -28,6 +29,7 @@ namespace nalu {
 
 ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node)
   : realm_(realm),
+    spatialAvg_(NULL),
     heights_(0),
     UmeanCalc_(0),
     TmeanCalc_(0),
@@ -45,6 +47,28 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
 {
   load(node);
 }
+
+ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node, SpatialAveragingAlgorithm& spatialAvg)
+  : realm_(realm),
+    spatialAvg_(&spatialAvg),
+    heights_(0),
+    UmeanCalc_(0),
+    TmeanCalc_(0),
+    searchMethod_("stk_kdtree"),
+    searchTolerance_(1.0e-4),
+    searchExpansionFactor_(1.5),
+    fromTargetNames_(0),
+    partNames_(),
+    inactiveSelector_(),
+    transfers_(0),
+    genPartList_(false),
+    partFmt_(""),
+    outputFreq_(10),
+    outFileFmt_("abl_%s_stats.dat")
+{
+    load(node);
+}
+    
 
 ABLPostProcessingAlgorithm::~ABLPostProcessingAlgorithm()
 {
@@ -95,7 +119,10 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
           "ABL Postprocessing: No target part(s) provided.");
   }
 
-
+  if(spatialAvg_ == NULL) {
+      spatialAvg_ = new SpatialAveragingAlgorithm(realm_, fromTargetNames_);
+  }
+  
   const int ndim = realm_.spatialDimension_;
   UmeanCalc_.resize(nHeights);
   for (size_t i = 0; i < nHeights; i++) {
@@ -152,26 +179,15 @@ ABLPostProcessingAlgorithm::register_fields()
   stk::mesh::MetaData& meta = realm_.meta_data();
   int nDim = meta.spatial_dimension();
   int nStates = realm_.number_of_states();
-
-  for (auto key : allPartNames_) {
-    stk::mesh::Part* part = meta.get_part(key);
-    VectorFieldType& coords = meta.declare_field<VectorFieldType>(
-      stk::topology::NODE_RANK, "coordinates");
-    stk::mesh::put_field(coords, *part, nDim);
-  }
-
+  
   for (auto key : partNames_) {
     stk::mesh::Part* part = meta.get_part(key);
-    VectorFieldType& vel = meta.declare_field<VectorFieldType>(
-      stk::topology::NODE_RANK, "velocity", nStates);
-    stk::mesh::put_field(vel, *part, nDim);
-  }
-
-  for (auto key : partNames_) {
-    stk::mesh::Part* part = meta.get_part(key);
-    ScalarFieldType& temp = meta.declare_field<ScalarFieldType>(
-      stk::topology::NODE_RANK, "temperature");
-    stk::mesh::put_field(temp, *part);
+    VectorFieldType* vel = meta.get_field<VectorFieldType>
+        (stk::topology::NODE_RANK, "velocity");
+    spatialAvg_->register_part_field<VectorFieldType>(part, vel);
+    ScalarFieldType* temp = meta.get_field<ScalarFieldType>(
+        stk::topology::NODE_RANK, "temperature");
+    spatialAvg_->register_part_field<ScalarFieldType>(part, temp);
   }
 }
 
@@ -188,7 +204,6 @@ ABLPostProcessingAlgorithm::initialize()
     allParts_.push_back(part);
   }
   inactiveSelector_ = stk::mesh::selectUnion(allParts_);
-  create_transfers();
 
   NaluEnv::self().naluOutputP0()
       << "ABL postprocessing active \n"
@@ -222,54 +237,13 @@ ABLPostProcessingAlgorithm::initialize()
 }
 
 void
-ABLPostProcessingAlgorithm::create_transfers()
-{
-  transfers_ = new Transfers(*realm_.root());
-
-  populate_transfer_data("velocity", partNames_);
-  populate_transfer_data("temperature", partNames_);
-
-  transfers_->initialize();
-}
-
-void
-ABLPostProcessingAlgorithm::populate_transfer_data(
-  std::string fieldName, const std::vector<std::string>& partNames)
-{
-  stk::mesh::MetaData& meta = realm_.meta_data();
-
-  Transfer* theXfer = new Transfer(*transfers_);
-  theXfer->name_ = "ablforcing_xfer_" + fieldName;
-  theXfer->fromRealm_ = &realm_;
-  theXfer->toRealm_ = &realm_;
-  theXfer->searchMethodName_ = searchMethod_;
-  theXfer->searchTolerance_ = searchTolerance_;
-  theXfer->searchExpansionFactor_ = searchExpansionFactor_;
-
-  for (auto key : fromTargetNames_) {
-    stk::mesh::Part* part = meta.get_part(key);
-    theXfer->fromPartVec_.push_back(part);
-  }
-  for (auto key : partNames) {
-    stk::mesh::Part* part = meta.get_part(key);
-    theXfer->toPartVec_.push_back(part);
-  }
-  theXfer->transferVariablesPairName_.push_back(
-    std::make_pair(fieldName, fieldName));
-  transfers_->transferVector_.push_back(theXfer);
-}
-
-void
 ABLPostProcessingAlgorithm::execute()
 {
-  // Map fields from fluidRealm onto averaging planes
-  transfers_->execute();
-  calc_vel_stats();
-  calc_temp_stats();
+  calc_stats();
 }
 
 void
-ABLPostProcessingAlgorithm::calc_vel_stats()
+ABLPostProcessingAlgorithm::calc_stats()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
   stk::mesh::BulkData& bulk = realm_.bulk_data();
@@ -279,18 +253,23 @@ ABLPostProcessingAlgorithm::calc_vel_stats()
 
   VectorFieldType* velocity =
     meta.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  ScalarFieldType* temperature =
+    meta.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
 
+  const size_t nVarStats = 9 ;// <u'^2>, <v'^2>, <w'^2>, <u'v'>, <u'w'>, <v'w'>, <w'^3>, <theta'^2>, <w'theta'>
   const size_t numPlanes = heights_.size();
-  // Sum(velocity) and number of nodes on this processor over all planes
-  std::vector<double> sumVel(numPlanes * nDim, 0.0);
+  // Sum(vectors) and number of nodes on this processor over all planes
+  std::vector<double> sumVarStats(numPlanes * nVarStats, 0.0);
   std::vector<unsigned> numNodes(numPlanes, 0);
   // Global sum and nodes for computing global average
-  std::vector<double> sumVelGlobal(numPlanes * nDim, 0.0);
+  std::vector<double> sumVarStatsGlobal(numPlanes * nVarStats, 0.0);
   std::vector<unsigned> totalNodes(numPlanes, 0);
-
   for (size_t ih = 0; ih < numPlanes; ih++) {
-    const int ioff = ih * nDim;
     stk::mesh::Part* part = meta.get_part(partNames_[ih]);
+    spatialAvg_->eval_mean(velocity, part, UmeanCalc_[ih].data());
+    spatialAvg_->eval_mean(temperature, part, &TmeanCalc_[ih]);
+    
+    const int ioff = ih * nVarStats;
     stk::mesh::Selector s_local_part(*part);
     const stk::mesh::BucketVector& node_buckets =
       bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
@@ -299,11 +278,19 @@ ABLPostProcessingAlgorithm::calc_vel_stats()
     for (size_t ib = 0; ib < node_buckets.size(); ib++) {
       stk::mesh::Bucket& bukt = *node_buckets[ib];
       double* velField = stk::mesh::field_data(*velocity, bukt);
+      double* tempField = stk::mesh::field_data(*temperature, bukt);
 
       for (size_t in = 0; in < bukt.size(); in++) {
         const int offset = in * nDim;
-        for (int i = 0; i < nDim; i++)
-          sumVel[ioff + i] += velField[offset + i];
+        sumVarStats[ioff + 0] += (velField[offset + 0] - UmeanCalc_[ih][0])*(velField[offset + 0] - UmeanCalc_[ih][0]); //<u'^2>
+        sumVarStats[ioff + 1] += (velField[offset + 1] - UmeanCalc_[ih][1])*(velField[offset + 1] - UmeanCalc_[ih][1]); //<v'^2>
+        sumVarStats[ioff + 2] += (velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<w'^2>
+        sumVarStats[ioff + 3] += (velField[offset + 0] - UmeanCalc_[ih][0])*(velField[offset + 1] - UmeanCalc_[ih][1]); //<u'v'>
+        sumVarStats[ioff + 4] += (velField[offset + 0] - UmeanCalc_[ih][0])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<u'w'>
+        sumVarStats[ioff + 5] += (velField[offset + 1] - UmeanCalc_[ih][1])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<v'w'>
+        sumVarStats[ioff + 6] += (velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<w'^3>
+        sumVarStats[ioff + 7] += (tempField[in] - TmeanCalc_[ih])*(tempField[in] - TmeanCalc_[ih]); //<theta'^2>
+        sumVarStats[ioff + 8] += (velField[offset + 2] - UmeanCalc_[ih][2])*(tempField[in] - TmeanCalc_[ih]); //<w'theta'>        
       }
       numNodes[ih] += bukt.size();
     }
@@ -311,118 +298,56 @@ ABLPostProcessingAlgorithm::calc_vel_stats()
 
   // Assemble global sum and node count
   stk::all_reduce_sum(
-    NaluEnv::self().parallel_comm(), sumVel.data(), sumVelGlobal.data(),
+    NaluEnv::self().parallel_comm(), sumVarStats.data(), sumVarStatsGlobal.data(),
     numPlanes * nDim);
   // Revisit this for area or volume weighted averaging.
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
     numPlanes);
 
-  // Compute spatial averages
-  for (size_t ih = 0; ih < numPlanes; ih++) {
-    const size_t ioff = ih * nDim;
-    for (int i = 0; i < nDim; i++) {
-      UmeanCalc_[ih][i] = sumVelGlobal[ioff + i] / totalNodes[ih];
-    }
-  }
+  // // Compute spatial averages
+  // for (size_t ih = 0; ih < numPlanes; ih++) {
+  //   const size_t ioff = ih * nDim;
+  //   for (int i = 0; i < nDim; i++) {
+  //     UmeanCalc_[ih][i] = sumVarStatsGlobal[ioff + i] / totalNodes[ih];
+  //   }
+  // }
 
-  const int tcount = realm_.get_time_step_count();
-  if (( NaluEnv::self().parallel_rank() == 0 ) &&
-      ( tcount % outputFreq_ == 0)) {
-    std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-    std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-    std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-    std::fstream uxFile, uyFile, uzFile;
-    uxFile.open(uxname.c_str(), std::fstream::app);
-    uyFile.open(uyname.c_str(), std::fstream::app);
-    uzFile.open(uzname.c_str(), std::fstream::app);
+  // const int tcount = realm_.get_time_step_count();
+  // if (( NaluEnv::self().parallel_rank() == 0 ) &&
+  //     ( tcount % outputFreq_ == 0)) {
+  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
+  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
+  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
+  //   std::fstream uxFile, uyFile, uzFile;
+  //   uxFile.open(uxname.c_str(), std::fstream::app);
+  //   uyFile.open(uyname.c_str(), std::fstream::app);
+  //   uzFile.open(uzname.c_str(), std::fstream::app);
 
-    uxFile << std::setw(12) << currTime << ", ";
-    uyFile << std::setw(12) << currTime << ", ";
-    uzFile << std::setw(12) << currTime << ", ";
-    for (size_t ih = 0; ih < heights_.size(); ih++) {
-      uxFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[0][ih] << ", ";
-      uyFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[1][ih] << ", ";
-      uzFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[2][ih] << ", ";
-    }
-    uxFile << std::endl;
-    uyFile << std::endl;
-    uzFile << std::endl;
-    uxFile.close();
-    uyFile.close();
-    uzFile.close();
-  }
+  //   uxFile << std::setw(12) << currTime << ", ";
+  //   uyFile << std::setw(12) << currTime << ", ";
+  //   uzFile << std::setw(12) << currTime << ", ";
+  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
+  //     uxFile << std::setprecision(6)
+  //            << std::setw(15)
+  //            << UmeanCalc_[0][ih] << ", ";
+  //     uyFile << std::setprecision(6)
+  //            << std::setw(15)
+  //            << UmeanCalc_[1][ih] << ", ";
+  //     uzFile << std::setprecision(6)
+  //            << std::setw(15)
+  //            << UmeanCalc_[2][ih] << ", ";
+  //   }
+  //   uxFile << std::endl;
+  //   uyFile << std::endl;
+  //   uzFile << std::endl;
+  //   uxFile.close();
+  //   uyFile.close();
+  //   uzFile.close();
+  // }
   
 }
 
-void
-ABLPostProcessingAlgorithm::calc_temp_stats()
-{
-  stk::mesh::MetaData& meta = realm_.meta_data();
-  stk::mesh::BulkData& bulk = realm_.bulk_data();
-  const double dt = realm_.get_time_step();
-  const double currTime = realm_.get_current_time();
- 
-  ScalarFieldType* temperature =
-    meta.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
-  const size_t numPlanes = heights_.size();
-  std::vector<double> sumTemp(numPlanes, 0.0), sumTempGlobal(numPlanes, 0.0);
-  std::vector<unsigned> numNodes(numPlanes, 0), totalNodes(numPlanes, 0);
-
-  for (size_t ih = 0; ih < numPlanes; ih++) {
-    stk::mesh::Part* part = meta.get_part(partNames_[ih]);
-    stk::mesh::Selector s_local_part(*part);
-    const stk::mesh::BucketVector& node_buckets =
-      bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
-
-    for (size_t ib = 0; ib < node_buckets.size(); ib++) {
-      stk::mesh::Bucket& bukt = *node_buckets[ib];
-      double* tempField = stk::mesh::field_data(*temperature, bukt);
-
-      for (size_t in = 0; in < bukt.size(); in++) {
-        sumTemp[ih] += tempField[in];
-      }
-      numNodes[ih] += bukt.size();
-    }
-  }
-
-  // Determine global sum and node count
-  stk::all_reduce_sum(
-    NaluEnv::self().parallel_comm(), sumTemp.data(), sumTempGlobal.data(),
-    numPlanes);
-  stk::all_reduce_sum(
-    NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
-    numPlanes);
-
-  // Compute spatial average
-  for (size_t ih = 0; ih < numPlanes; ih++) {
-    TmeanCalc_[ih] = sumTempGlobal[ih] / totalNodes[ih];
-  }
-
-  const int tcount = realm_.get_time_step_count();
-  if (( NaluEnv::self().parallel_rank() == 0 ) &&
-      ( tcount % outputFreq_ == 0)) {
-      std::string fname((boost::format(outFileFmt_)%"T").str());
-      std::fstream tFile;
-      tFile.open(fname.c_str(), std::fstream::app);
-
-      tFile << currTime << ", ";
-      for (size_t ih = 0; ih < heights_.size(); ih++) {
-          tFile << std::setprecision(6)
-                << std::setw(15)
-                << TmeanCalc_[ih] << ", ";
-      }
-      tFile << std::endl;
-      tFile.close();
-  }
-  
-}
 
 void
 ABLPostProcessingAlgorithm::eval_vel_mean(

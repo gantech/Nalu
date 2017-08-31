@@ -71,6 +71,7 @@ class Transfer;
 class SolutionNormPostProcessing;
 class TurbulenceAveragingPostProcessing;
 class DataProbePostProcessing;
+class SpatialAveragingAlgorithm;
 class ActuatorLine;
 class ABLForcingAlgorithm;
 class ABLPostProcessingAlgorithm;
@@ -414,6 +415,7 @@ class Realm {
   SolutionNormPostProcessing *solutionNormPostProcessing_;
   TurbulenceAveragingPostProcessing *turbulenceAveragingPostProcessing_;
   DataProbePostProcessing *dataProbePostProcessing_;
+  SpatialAveragingAlgorithm *spatialAveraging_;
   ActuatorLine *actuatorLine_;
   ABLForcingAlgorithm *ablForcingAlg_;
   ABLPostProcessingAlgorithm *ablPostProcessingAlg_;  
