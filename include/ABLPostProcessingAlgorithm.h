@@ -95,6 +95,9 @@ private:
   //! Helper method to compute the statistics on z-planes
   void calc_stats();
 
+  //! Helper method to compute average friction velocity at the ABL surface
+  void calc_utau();
+  
   //! Reference to Realm
   Realm& realm_;
 
@@ -115,6 +118,9 @@ private:
   //! Planar variances calculated on the surface [num_UHeights, 9]
   Array2D<double> varCalc_;
 
+  //! Average friction velocity at the wall
+  double utauCalc_ ;
+  
   //! stk::Transfer search methods
   std::string searchMethod_;
   //! stk::Transfer search tolerance
@@ -131,6 +137,10 @@ private:
 
   stk::mesh::PartVector allParts_;
   stk::mesh::Selector inactiveSelector_;
+
+  //! Name(s) of lower surface sidesets in the ABL
+  std::vector<std::string> ablWallNames_;
+  stk::mesh::PartVector ablWallPartVec_;
 
   Transfers* transfers_;
 

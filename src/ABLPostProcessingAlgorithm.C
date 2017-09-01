@@ -2,6 +2,7 @@
 #include "ABLPostProcessingAlgorithm.h"
 #include "SpatialAveragingAlgorithm.h"
 #include "Realm.h"
+#include <master_element/MasterElement.h>
 #include "xfer/Transfer.h"
 #include "xfer/Transfers.h"
 #include "utils/LinearInterpolation.h"
@@ -11,6 +12,7 @@
 #include <stk_mesh/base/Entity.hpp>
 #include <stk_mesh/base/Field.hpp>
 #include <stk_mesh/base/GetBuckets.hpp>
+#include <stk_mesh/base/GetEntities.hpp>
 #include <stk_mesh/base/Selector.hpp>
 #include <stk_mesh/base/MetaData.hpp>
 #include <stk_mesh/base/Part.hpp>
@@ -119,6 +121,19 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
           "ABL Postprocessing: No target part(s) provided.");
   }
 
+  if (node["abl_wall_parts"]) {
+      const YAML::Node& ablWallParts = node["abl_wall_parts"];
+      if (ablWallParts.IsSequence()) {
+          ablWallNames_ = ablWallParts.as<std::vector<std::string>>();
+      } else if (ablWallParts.IsScalar()) {
+          ablWallNames_.resize(1);
+          ablWallNames_[0] = ablWallParts.as<std::string>();
+      }
+  } else {
+      throw std::runtime_error(
+          "No abl_wall_parts specified for ABL postprocessing function");
+  }
+
   if(spatialAvg_ == NULL) {
       spatialAvg_ = new SpatialAveragingAlgorithm(realm_, fromTargetNames_);
   }
@@ -173,6 +188,18 @@ ABLPostProcessingAlgorithm::determine_part_names(
       allPartNames_.insert(partName);
     }
   }
+
+  for (auto partName : ablWallNames_) {
+      stk::mesh::Part* part = meta.get_part(partName);
+      if (NULL == part) {
+          throw std::runtime_error(
+              "ABLPostProcessingAlgorithm::setup: Cannot find part " + partName);
+      } else {
+
+          ablWallPartVec_.push_back(part);
+      }
+  }
+  
 }
 
 void
@@ -197,7 +224,8 @@ void
 ABLPostProcessingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
-
+  int nDim = meta.spatial_dimension();
+ 
   // We expect all parts to exist, so no creation step here
 
   // Add all parts to inactive selection
@@ -213,35 +241,34 @@ ABLPostProcessingAlgorithm::initialize()
 
   // Prepare output files to dump sources when computed during precursor phase
   if (( NaluEnv::self().parallel_rank() == 0 )) {
-    std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-    std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-    std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-    std::string varname((boost::format(outFileFmt_)%"Var").str());
-    std::fstream uxFile, uyFile, uzFile, varFile;
-    uxFile.open(uxname.c_str(), std::fstream::out);
-    uyFile.open(uyname.c_str(), std::fstream::out);
-    uzFile.open(uzname.c_str(), std::fstream::out);
-    varFile.open(varname.c_str(), std::fstream::out);
-    
-    uxFile << "# Time, " ;
-    uyFile << "# Time, " ;
-    uzFile << "# Time, " ;
-    varFile << "# Time, " ;    
+    std::string uMeanName((boost::format(outFileFmt_)%"U").str());
+    std::string tMeanName((boost::format(outFileFmt_)%"T").str());
+    std::string varName((boost::format(outFileFmt_)%"Var").str());
+    std::string uTauName((boost::format(outFileFmt_)%"uTau").str());    
+    std::fstream uMeanFile, tMeanFile, varFile, uTauFile;
+    uMeanFile.open(uMeanName.c_str(), std::fstream::out);
+    tMeanFile.open(tMeanName.c_str(), std::fstream::out);
+    varFile.open(varName.c_str(), std::fstream::out);
+    uTauFile.open(uTauName.c_str(), std::fstream::out);    
+    uMeanFile << "# Time, " ;
+    tMeanFile << "# Time, " ;
+    varFile << "# Time, " ;
+    uTauFile << "# Time, " ;    
     for (size_t ih = 0; ih < heights_.size(); ih++) {
-      uxFile << heights_[ih] << ", ";
-      uyFile << heights_[ih] << ", ";
-      uzFile << heights_[ih] << ", ";
+      for (size_t iDim = 0; iDim < nDim; iDim++)
+          uMeanFile << heights_[ih] << ", ";
+      tMeanFile << heights_[ih] << ", ";      
       for (size_t iVarStat = 0; iVarStat < nVarStats_; iVarStat++)
           varFile << heights_[ih] << ", ";
     }
-    uxFile << std::endl ;
-    uyFile << std::endl ;
-    uzFile << std::endl ;
+    uMeanFile << std::endl ;
+    tMeanFile << std::endl ;    
     varFile << std::endl ;
-    uxFile.close();
-    uyFile.close();
-    uzFile.close();
+    uTauFile << std::endl ;
+    uMeanFile.close();
+    tMeanFile.close();    
     varFile.close() ;
+    uTauFile.close();
   }
 }
 
@@ -249,6 +276,7 @@ void
 ABLPostProcessingAlgorithm::execute()
 {
   calc_stats();
+  calc_utau();  
 }
 
 void
@@ -324,48 +352,114 @@ ABLPostProcessingAlgorithm::calc_stats()
   const int tcount = realm_.get_time_step_count();
   if (( NaluEnv::self().parallel_rank() == 0 ) &&
       ( tcount % outputFreq_ == 0)) {
-    std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-    std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-    std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-    std::string varname((boost::format(outFileFmt_)%"Var").str());
-    std::fstream uxFile, uyFile, uzFile, varFile;
-    uxFile.open(uxname.c_str(), std::fstream::app);
-    uyFile.open(uyname.c_str(), std::fstream::app);
-    uzFile.open(uzname.c_str(), std::fstream::app);
-    varFile.open(varname.c_str(), std::fstream::out);
-
-    uxFile << std::setw(12) << currTime << ", ";
-    uyFile << std::setw(12) << currTime << ", ";
-    uzFile << std::setw(12) << currTime << ", ";
-    varFile << "# Time, " ;    
+    std::string uMeanName((boost::format(outFileFmt_)%"U").str());
+    std::string tMeanName((boost::format(outFileFmt_)%"U").str());
+    std::string varName((boost::format(outFileFmt_)%"Var").str());
+    std::fstream uMeanFile, tMeanFile, varFile;
+    uMeanFile.open(uMeanName.c_str(), std::fstream::app);
+    tMeanFile.open(tMeanName.c_str(), std::fstream::app);    
+    varFile.open(varName.c_str(), std::fstream::out);
+    uMeanFile << std::setw(12) << currTime << ", ";
+    tMeanFile << std::setw(12) << currTime << ", ";    
+    varFile << std::setw(12) << currTime << ", ";
     for (size_t ih = 0; ih < heights_.size(); ih++) {
-      uxFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[0][ih] << ", ";
-      uyFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[1][ih] << ", ";
-      uzFile << std::setprecision(6)
-             << std::setw(15)
-             << UmeanCalc_[2][ih] << ", ";
+      for (size_t iDim = 0; iDim < nDim; iDim++)
+          uMeanFile << std::setprecision(6)
+                    << std::setw(15)
+                    << UmeanCalc_[ih][iDim] << ", ";
+      tMeanFile << std::setprecision(6)
+                << std::setw(15)
+                << TmeanCalc_[ih] << ", ";
       for (size_t iVarStat = 0; iVarStat < nVarStats_; iVarStat++)
           varFile << std::setprecision(6)
                   << std::setw(15)
                   << varCalc_[ih][iVarStat] << ", ";
-      
+     
     }
-    uxFile << std::endl;
-    uyFile << std::endl;
-    uzFile << std::endl;
+    uMeanFile << std::endl;
+    tMeanFile << std::endl;    
     varFile << std::endl ;
-    uxFile.close();
-    uyFile.close();
-    uzFile.close();
+    uMeanFile.close();
+    tMeanFile.close();
     varFile.close() ;
   }
   
 }
 
+
+void
+ABLPostProcessingAlgorithm::calc_utau()
+{
+
+    std::array<double, 2> uTauAreaSumLocal{0.0, 0.0}; // First value hold uTau * area, second value holds area. To get average utau, sum both quantities over all processes and divide one by another.
+    std::array<double, 2> uTauAreaSumGlobal{0.0, 0.0};
+    
+    stk::mesh::MetaData & meta_data = realm_.meta_data();
+    const int nDim = meta_data.spatial_dimension();
+    const double currTime = realm_.get_current_time();
+    
+    GenericFieldType* exposedAreaVec = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "exposed_area_vector");
+    GenericFieldType* wallFrictionVelocityBip = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "wall_friction_velocity_bip");
+    stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
+        &stk::mesh::selectUnion(ablWallPartVec_);
+    stk::mesh::BucketVector const& face_buckets =
+        realm_.get_buckets( meta_data.side_rank(), s_locally_owned_union );
+    for ( stk::mesh::BucketVector::const_iterator ib = face_buckets.begin();
+          ib != face_buckets.end() ; ++ib ) {
+        stk::mesh::Bucket & b = **ib ;
+
+        // face master element
+        MasterElement *meFC = sierra::nalu::get_surface_master_element(b.topology());
+        const int numScsBip = meFC->numIntPoints_;
+
+        const stk::mesh::Bucket::size_type length   = b.size();
+
+        for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+
+            // get face
+            stk::mesh::Entity face = b[k];
+
+            // pointer to face data
+            const double * areaVec = stk::mesh::field_data(*exposedAreaVec, face);
+            double *wallFVBip = stk::mesh::field_data(*wallFrictionVelocityBip, face);
+
+            // loop over face nodes
+            for ( int ip = 0; ip < numScsBip; ++ip ) {
+
+                const int offSetAveraVec = ip*nDim;
+                double aMag = 0.0;
+                for ( int j = 0; j < nDim; ++j ) {
+                    const double axj = areaVec[offSetAveraVec+j];
+                    aMag += axj*axj;
+                }
+                aMag = std::sqrt(aMag);
+
+                uTauAreaSumLocal[0] += wallFVBip[ip] * aMag ;
+                uTauAreaSumLocal[1] += aMag ;
+            }
+        }
+    }
+
+    stk::all_reduce_sum(
+        NaluEnv::self().parallel_comm(), uTauAreaSumLocal.data(), uTauAreaSumGlobal.data(), 2);
+
+    utauCalc_ = uTauAreaSumGlobal[0]/uTauAreaSumGlobal[1] ;
+
+    const int tcount = realm_.get_time_step_count();
+    if (( NaluEnv::self().parallel_rank() == 0 ) &&
+        ( tcount % outputFreq_ == 0)) {
+        std::string uTauName((boost::format(outFileFmt_)%"uTau").str());
+        std::fstream uTauFile;
+        uTauFile.open(uTauName.c_str(), std::fstream::app);
+        uTauFile << std::setw(12) << currTime << ", ";    
+        uTauFile << std::setprecision(6)
+                 << std::setw(15)
+                 << utauCalc_ ;
+        uTauFile << std::endl;
+        uTauFile.close();
+    }
+    
+}
 
 void
 ABLPostProcessingAlgorithm::eval_vel_mean(
