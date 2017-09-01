@@ -48,9 +48,9 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
   load(node);
 }
 
-ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node, SpatialAveragingAlgorithm& spatialAvg)
+ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node, SpatialAveragingAlgorithm* spatialAvg)
   : realm_(realm),
-    spatialAvg_(&spatialAvg),
+    spatialAvg_(spatialAvg),
     heights_(0),
     UmeanCalc_(0),
     TmeanCalc_(0),
@@ -125,8 +125,10 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
   
   const int ndim = realm_.spatialDimension_;
   UmeanCalc_.resize(nHeights);
+  varCalc_.resize(nHeights);
   for (size_t i = 0; i < nHeights; i++) {
       UmeanCalc_[i].resize(ndim);
+      varCalc_[i].resize(nVarStats_);
   }
   TmeanCalc_.resize(nHeights);
   
@@ -214,25 +216,32 @@ ABLPostProcessingAlgorithm::initialize()
     std::string uxname((boost::format(outFileFmt_)%"Ux").str());
     std::string uyname((boost::format(outFileFmt_)%"Uy").str());
     std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-    std::fstream uxFile, uyFile, uzFile;
+    std::string varname((boost::format(outFileFmt_)%"Var").str());
+    std::fstream uxFile, uyFile, uzFile, varFile;
     uxFile.open(uxname.c_str(), std::fstream::out);
     uyFile.open(uyname.c_str(), std::fstream::out);
     uzFile.open(uzname.c_str(), std::fstream::out);
-
+    varFile.open(varname.c_str(), std::fstream::out);
+    
     uxFile << "# Time, " ;
     uyFile << "# Time, " ;
     uzFile << "# Time, " ;
+    varFile << "# Time, " ;    
     for (size_t ih = 0; ih < heights_.size(); ih++) {
       uxFile << heights_[ih] << ", ";
       uyFile << heights_[ih] << ", ";
       uzFile << heights_[ih] << ", ";
+      for (size_t iVarStat = 0; iVarStat < nVarStats_; iVarStat++)
+          varFile << heights_[ih] << ", ";
     }
     uxFile << std::endl ;
     uyFile << std::endl ;
     uzFile << std::endl ;
+    varFile << std::endl ;
     uxFile.close();
     uyFile.close();
     uzFile.close();
+    varFile.close() ;
   }
 }
 
@@ -256,20 +265,19 @@ ABLPostProcessingAlgorithm::calc_stats()
   ScalarFieldType* temperature =
     meta.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
 
-  const size_t nVarStats = 9 ;// <u'^2>, <v'^2>, <w'^2>, <u'v'>, <u'w'>, <v'w'>, <w'^3>, <theta'^2>, <w'theta'>
   const size_t numPlanes = heights_.size();
   // Sum(vectors) and number of nodes on this processor over all planes
-  std::vector<double> sumVarStats(numPlanes * nVarStats, 0.0);
+  std::vector<double> sumVarStats(numPlanes * nVarStats_, 0.0);
   std::vector<unsigned> numNodes(numPlanes, 0);
   // Global sum and nodes for computing global average
-  std::vector<double> sumVarStatsGlobal(numPlanes * nVarStats, 0.0);
+  std::vector<double> sumVarStatsGlobal(numPlanes * nVarStats_, 0.0);
   std::vector<unsigned> totalNodes(numPlanes, 0);
   for (size_t ih = 0; ih < numPlanes; ih++) {
     stk::mesh::Part* part = meta.get_part(partNames_[ih]);
     spatialAvg_->eval_mean(velocity, part, UmeanCalc_[ih].data());
     spatialAvg_->eval_mean(temperature, part, &TmeanCalc_[ih]);
     
-    const int ioff = ih * nVarStats;
+    const int ioff = ih * nVarStats_;
     stk::mesh::Selector s_local_part(*part);
     const stk::mesh::BucketVector& node_buckets =
       bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
@@ -305,46 +313,56 @@ ABLPostProcessingAlgorithm::calc_stats()
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
     numPlanes);
 
-  // // Compute spatial averages
-  // for (size_t ih = 0; ih < numPlanes; ih++) {
-  //   const size_t ioff = ih * nDim;
-  //   for (int i = 0; i < nDim; i++) {
-  //     UmeanCalc_[ih][i] = sumVarStatsGlobal[ioff + i] / totalNodes[ih];
-  //   }
-  // }
+  // Compute variances and covariances
+  for (size_t ih = 0; ih < numPlanes; ih++) {
+    const size_t ioff = ih * nVarStats_;
+    for (int i = 0; i < nVarStats_; i++) {
+      varCalc_[ih][i] = sumVarStatsGlobal[ioff + i] / totalNodes[ih];
+    }
+  }
 
-  // const int tcount = realm_.get_time_step_count();
-  // if (( NaluEnv::self().parallel_rank() == 0 ) &&
-  //     ( tcount % outputFreq_ == 0)) {
-  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-  //   std::fstream uxFile, uyFile, uzFile;
-  //   uxFile.open(uxname.c_str(), std::fstream::app);
-  //   uyFile.open(uyname.c_str(), std::fstream::app);
-  //   uzFile.open(uzname.c_str(), std::fstream::app);
+  const int tcount = realm_.get_time_step_count();
+  if (( NaluEnv::self().parallel_rank() == 0 ) &&
+      ( tcount % outputFreq_ == 0)) {
+    std::string uxname((boost::format(outFileFmt_)%"Ux").str());
+    std::string uyname((boost::format(outFileFmt_)%"Uy").str());
+    std::string uzname((boost::format(outFileFmt_)%"Uz").str());
+    std::string varname((boost::format(outFileFmt_)%"Var").str());
+    std::fstream uxFile, uyFile, uzFile, varFile;
+    uxFile.open(uxname.c_str(), std::fstream::app);
+    uyFile.open(uyname.c_str(), std::fstream::app);
+    uzFile.open(uzname.c_str(), std::fstream::app);
+    varFile.open(varname.c_str(), std::fstream::out);
 
-  //   uxFile << std::setw(12) << currTime << ", ";
-  //   uyFile << std::setw(12) << currTime << ", ";
-  //   uzFile << std::setw(12) << currTime << ", ";
-  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
-  //     uxFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[0][ih] << ", ";
-  //     uyFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[1][ih] << ", ";
-  //     uzFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[2][ih] << ", ";
-  //   }
-  //   uxFile << std::endl;
-  //   uyFile << std::endl;
-  //   uzFile << std::endl;
-  //   uxFile.close();
-  //   uyFile.close();
-  //   uzFile.close();
-  // }
+    uxFile << std::setw(12) << currTime << ", ";
+    uyFile << std::setw(12) << currTime << ", ";
+    uzFile << std::setw(12) << currTime << ", ";
+    varFile << "# Time, " ;    
+    for (size_t ih = 0; ih < heights_.size(); ih++) {
+      uxFile << std::setprecision(6)
+             << std::setw(15)
+             << UmeanCalc_[0][ih] << ", ";
+      uyFile << std::setprecision(6)
+             << std::setw(15)
+             << UmeanCalc_[1][ih] << ", ";
+      uzFile << std::setprecision(6)
+             << std::setw(15)
+             << UmeanCalc_[2][ih] << ", ";
+      for (size_t iVarStat = 0; iVarStat < nVarStats_; iVarStat++)
+          varFile << std::setprecision(6)
+                  << std::setw(15)
+                  << varCalc_[ih][iVarStat] << ", ";
+      
+    }
+    uxFile << std::endl;
+    uyFile << std::endl;
+    uzFile << std::endl;
+    varFile << std::endl ;
+    uxFile.close();
+    uyFile.close();
+    uzFile.close();
+    varFile.close() ;
+  }
   
 }
 

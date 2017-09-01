@@ -4,8 +4,23 @@
 
 #include "NaluParsing.h"
 #include "FieldTypeDef.h"
+#include "Realm.h"
+#include "xfer/Transfer.h"
+#include "xfer/Transfers.h"
+#include "utils/LinearInterpolation.h"
 
-#include "stk_mesh/base/Selector.hpp"
+// stk_mesh/base/fem
+#include <stk_mesh/base/BulkData.hpp>
+#include <stk_mesh/base/Entity.hpp>
+#include <stk_mesh/base/Field.hpp>
+#include <stk_mesh/base/GetBuckets.hpp>
+#include <stk_mesh/base/Selector.hpp>
+#include <stk_mesh/base/MetaData.hpp>
+#include <stk_mesh/base/Part.hpp>
+
+#include <stk_io/IossBridge.hpp>
+
+#include <stk_util/parallel/ParallelReduce.hpp>
 
 #include <string>
 #include <vector>
@@ -152,6 +167,70 @@ private:
   //! "spatial_average_%s.dat"
   std::string outFileFmt_;
 };
+
+template<typename FieldType>
+void SpatialAveragingAlgorithm::register_part_field(
+    stk::mesh::Part* part, FieldType* field)
+{
+    stk::mesh::MetaData& meta = realm_.meta_data();
+    int nDim = meta.spatial_dimension();
+    int nStates = realm_.number_of_states();
+
+    auto it = allPartNames_.find(part->name());
+    if (it != allPartNames_.end()) {
+        // Part already exists. Nothing to do here
+    } else {
+        allPartNames_.insert(part->name());
+        VectorFieldType& coords = meta.declare_field<VectorFieldType>(
+            stk::topology::NODE_RANK, "coordinates");
+        stk::mesh::put_field(coords, *part, nDim);
+    }
+    
+    std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
+    if(field->field_array_rank()) {
+        if(vectorAvg_.find(partFieldPair) == vectorAvg_.end()) {
+            // Part - Field combination already exists. Nothing to do here  
+        } else {
+            VectorFieldType& vecField = meta.declare_field<VectorFieldType>(
+                stk::topology::NODE_RANK, field->name(), nStates);
+            stk::mesh::put_field(vecField, *part, nDim);
+            std::vector<double> zeroVector;
+            zeroVector.resize(nDim);
+            for(int i=0; i<nDim; i++) zeroVector[i] = 0.0;
+            vectorAvg_.insert( { {part->name(), field->name()}, zeroVector } );            
+        }
+    } else {
+        if(scalarAvg_.find(partFieldPair) == scalarAvg_.end()) {
+            // Part - Field combination already exists. Nothing to do here  
+        } else {
+            ScalarFieldType& scalarField = meta.declare_field<ScalarFieldType>(
+                stk::topology::NODE_RANK, field->name(), nStates);
+            stk::mesh::put_field(scalarField, *part, nDim);
+            scalarAvg_.insert( { {part->name(), field->name()}, 0.0 } );
+        }
+    }
+    
+}
+
+template<typename FieldType>
+void SpatialAveragingAlgorithm::eval_mean(
+    FieldType* field, stk::mesh::Part* part, double * avgValue)
+{
+    const int nDim = realm_.spatialDimension_;
+
+    std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
+    if(field->field_array_rank()) {
+        std::vector<double> mapValue = vectorAvg_.find(partFieldPair)->second;
+        for(int i=0; i<nDim; i++)
+            avgValue[i] = mapValue[i];
+    } else {
+        double mapValue = scalarAvg_.find(partFieldPair)->second;
+        *avgValue = mapValue;
+    }
+    
+}
+
+
 }
 }
 

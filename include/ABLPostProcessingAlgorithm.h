@@ -47,7 +47,7 @@ public:
 
   ABLPostProcessingAlgorithm(Realm&, const YAML::Node&);
 
-  ABLPostProcessingAlgorithm(Realm&, const YAML::Node&, SpatialAveragingAlgorithm& spatialAvg);
+  ABLPostProcessingAlgorithm(Realm&, const YAML::Node&, SpatialAveragingAlgorithm* spatialAvg);
   
   ~ABLPostProcessingAlgorithm();
 
@@ -109,6 +109,11 @@ private:
 
   //! Planar average temperature calculated on the surface [num_THeights]
   std::vector<double> TmeanCalc_;
+
+  const size_t nVarStats_ = 9 ;// <u'^2>, <v'^2>, <w'^2>, <u'v'>, <u'w'>, <v'w'>, <w'^3>, <theta'^2>, <w'theta'>
+  
+  //! Planar variances calculated on the surface [num_UHeights, 9]
+  Array2D<double> varCalc_;
 
   //! stk::Transfer search methods
   std::string searchMethod_;
