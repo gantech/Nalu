@@ -43,7 +43,7 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::N
     scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
-    outFileFmt_("spatial_averaging_%s.dat")
+    outFile_("spatial_averaging.dat")
 {
   load(node);
 }
@@ -65,7 +65,7 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const std::ve
     scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
-    outFileFmt_("")
+    outFile_("")
 {
 }
     
@@ -84,7 +84,7 @@ SpatialAveragingAlgorithm::load(const YAML::Node& node)
                  searchExpansionFactor_);
   
   get_if_present(node, "output_frequency", outputFreq_, outputFreq_);
-  get_if_present(node, "output_format", outFileFmt_, outFileFmt_);
+  get_if_present(node, "output_file", outFile_, outFile_);
 
   if (node["from_target_part"]) {
     const YAML::Node& fromParts = node["from_target_part"];
@@ -205,12 +205,14 @@ SpatialAveragingAlgorithm::register_fields()
                   stk::topology::NODE_RANK, fieldName_[jField], nStates);
               stk::mesh::put_field(scalarField, *part, nDim);
               scalarAvgMap_.insert( { {partNames_[iPart], fieldName_[jField]}, nScalarAvg_ } );
+              scalarIO_.push_back(true);
 	      nScalarAvg_++;
           } else if (fieldSize_[jField] == 3) {
               VectorFieldType& vecField = meta.declare_field<VectorFieldType>(
                   stk::topology::NODE_RANK, fieldName_[jField], nStates);
               stk::mesh::put_field(vecField, *part, nDim);
               vectorAvgMap_.insert( { {partNames_[iPart], fieldName_[jField]}, nVectorAvg_ } );
+              vectorIO_.push_back(true);
 	      nVectorAvg_++;
           }
       }
@@ -241,31 +243,12 @@ SpatialAveragingAlgorithm::initialize()
       << "Spatial Averaging active \n"
       << "\t Number of planes: " << allPartNames_.size() << std::endl;
 
-  // // Prepare output files to dump sources when computed during precursor phase
-  // if (( NaluEnv::self().parallel_rank() == 0 )) {
-  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-  //   std::fstream uxFile, uyFile, uzFile;
-  //   uxFile.open(uxname.c_str(), std::fstream::out);
-  //   uyFile.open(uyname.c_str(), std::fstream::out);
-  //   uzFile.open(uzname.c_str(), std::fstream::out);
-
-  //   uxFile << "# Time, " ;
-  //   uyFile << "# Time, " ;
-  //   uzFile << "# Time, " ;
-  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
-  //     uxFile << heights_[ih] << ", ";
-  //     uyFile << heights_[ih] << ", ";
-  //     uzFile << heights_[ih] << ", ";
-  //   }
-  //   uxFile << std::endl ;
-  //   uyFile << std::endl ;
-  //   uzFile << std::endl ;
-  //   uxFile.close();
-  //   uyFile.close();
-  //   uzFile.close();
-  // }
+  // Prepare output files to dump sources when computed during precursor phase
+  if (( NaluEnv::self().parallel_rank() == 0 )) {
+    std::fstream spAvgFile;
+    spAvgFile.open(outFile_.c_str(), std::fstream::out);
+    spAvgFile.close();
+  }
 }
 
 void
@@ -371,46 +354,36 @@ SpatialAveragingAlgorithm::calc_vector_averages()
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
     nVectorAvg_);
 
-  // Compute spatial averages
+  // Compute spatial averages 
   for(auto key: vectorAvgMap_) {
       const size_t ivAvg = key.second;
       for (int i = 0; i < nDim; i++) 
 	vectorAvg_[ivAvg][i] = sumVectGlobal[ivAvg*nDim + i] / totalNodes[ivAvg];
+
   }
 
-  // const int tcount = realm_.get_time_step_count();
-  // if (( NaluEnv::self().parallel_rank() == 0 ) &&
-  //     ( tcount % outputFreq_ == 0)) {
-  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-  //   std::fstream uxFile, uyFile, uzFile;
-  //   uxFile.open(uxname.c_str(), std::fstream::app);
-  //   uyFile.open(uyname.c_str(), std::fstream::app);
-  //   uzFile.open(uzname.c_str(), std::fstream::app);
-
-  //   uxFile << std::setw(12) << currTime << ", ";
-  //   uyFile << std::setw(12) << currTime << ", ";
-  //   uzFile << std::setw(12) << currTime << ", ";
-  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
-  //     uxFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[0][ih] << ", ";
-  //     uyFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[1][ih] << ", ";
-  //     uzFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[2][ih] << ", ";
-  //   }
-  //   uxFile << std::endl;
-  //   uyFile << std::endl;
-  //   uzFile << std::endl;
-  //   uxFile.close();
-  //   uyFile.close();
-  //   uzFile.close();
-  // }
-  
+  // Write averages to file if necessary
+  const int tcount = realm_.get_time_step_count();
+  if (( NaluEnv::self().parallel_rank() == 0 ) &&
+      ( tcount % outputFreq_ == 0)) {
+      std::fstream spAvgFile;
+      spAvgFile.open(outFile_.c_str(), std::fstream::app);
+      spAvgFile << "Time: " << std::setw(12) << currTime << std::endl;
+      for(auto key: vectorAvgMap_) {
+          const size_t ivAvg = key.second;
+          if(vectorIO_[ivAvg]) {
+              spAvgFile << "Part: " << (key.first).first << " Field: " << (key.first).second ;
+              for (int i = 0; i < nDim; i++)                  
+                  spAvgFile << std::setprecision(6)
+                            << std::setw(15)
+                            << vectorAvg_[ivAvg][i];
+              spAvgFile << std::endl ;
+          }
+      }
+      spAvgFile << std::endl;
+      spAvgFile.close();
+  }
+ 
 }
 
 void
@@ -463,39 +436,27 @@ SpatialAveragingAlgorithm::calc_scalar_averages()
       scalarAvg_[isAvg] = sumScalGlobal[isAvg] / totalNodes[isAvg];
   }
 
-  // const int tcount = realm_.get_time_step_count();
-  // if (( NaluEnv::self().parallel_rank() == 0 ) &&
-  //     ( tcount % outputFreq_ == 0)) {
-  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-  //   std::fstream uxFile, uyFile, uzFile;
-  //   uxFile.open(uxname.c_str(), std::fstream::app);
-  //   uyFile.open(uyname.c_str(), std::fstream::app);
-  //   uzFile.open(uzname.c_str(), std::fstream::app);
+  // Write averages to file if necessary
+  const int tcount = realm_.get_time_step_count();
+  if (( NaluEnv::self().parallel_rank() == 0 ) &&
+      ( tcount % outputFreq_ == 0)) {
+      std::fstream spAvgFile;
+      spAvgFile.open(outFile_.c_str(), std::fstream::app);
+      spAvgFile << "Time: " << std::setw(12) << currTime << std::endl;
+      for(auto key: scalarAvgMap_) {
+          const size_t isAvg = key.second;
+          if(vectorIO_[isAvg]) {
+              spAvgFile << "Part: " << (key.first).first << " Field: " << (key.first).second ;
+              spAvgFile << std::setprecision(6)
+                        << std::setw(15)
+                        << scalarAvg_[isAvg]
+                        << std::endl ;
+      }
+      spAvgFile << std::endl;
+      spAvgFile.close();
+  }
+}
 
-  //   uxFile << std::setw(12) << currTime << ", ";
-  //   uyFile << std::setw(12) << currTime << ", ";
-  //   uzFile << std::setw(12) << currTime << ", ";
-  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
-  //     uxFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[0][ih] << ", ";
-  //     uyFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[1][ih] << ", ";
-  //     uzFile << std::setprecision(6)
-  //            << std::setw(15)
-  //            << UmeanCalc_[2][ih] << ", ";
-  //   }
-  //   uxFile << std::endl;
-  //   uyFile << std::endl;
-  //   uzFile << std::endl;
-  //   uxFile.close();
-  //   uyFile.close();
-  //   uzFile.close();
-  // }
-  
 }
 
 

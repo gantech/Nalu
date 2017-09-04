@@ -129,6 +129,8 @@ private:
   size_t nScalarAvg_;
   std::vector<std::vector<double>> vectorAvg_;
   std::vector<double> scalarAvg_;
+  std::vector<bool> vectorIO_;
+  std::vector<bool> scalarIO_;
   std::map<std::pair<std::string, std::string>, size_t > vectorAvgMap_;
   std::map<std::pair<std::string, std::string>, size_t > scalarAvgMap_;
   
@@ -166,10 +168,8 @@ private:
  //! Write frequency for source term output
   int outputFreq_;
 
-  //! Format string specifier indicating the file name for output. The
-  //! specification takes one `%s` specifier. Default is
-  //! "spatial_average_%s.dat"
-  std::string outFileFmt_;
+  //! File name for output. Default is "spatial_average.dat"
+  std::string outFile_;
 };
 
 template<typename FieldType>
@@ -199,6 +199,7 @@ void SpatialAveragingAlgorithm::register_part_field(
                 stk::topology::NODE_RANK, field->name(), nStates);
             stk::mesh::put_field(vecField, *part, nDim);
             vectorAvgMap_.insert( { {part->name(), field->name()}, nVectorAvg_ } );
+            vectorIO_.push_back(false);
 	    nVectorAvg_++;
         }
     } else {
@@ -209,6 +210,7 @@ void SpatialAveragingAlgorithm::register_part_field(
                 stk::topology::NODE_RANK, field->name());
             stk::mesh::put_field(scalarField, *part);
             scalarAvgMap_.insert( { {part->name(), field->name()}, nScalarAvg_ } );
+            scalarIO_.push_back(true);
 	    nScalarAvg_++;
         }
     }
@@ -259,3 +261,4 @@ void SpatialAveragingAlgorithm::eval_mean(
 }
 
 #endif /* SPATIALAVERAGINGALGORITHM_H */
+
