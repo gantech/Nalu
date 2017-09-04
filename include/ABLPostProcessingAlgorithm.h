@@ -103,6 +103,9 @@ private:
 
   //! Pointer to SpatialAveragingAlgorithm
   SpatialAveragingAlgorithm * spatialAvg_;
+
+  //! Flag that determines whether spatialAvg_ is from Realm or just within this class
+  bool indepSpatAvg_ ;
   
   //! Heights where velocity information is provided
   std::vector<double> heights_; // Array of shape [num_Uheights]

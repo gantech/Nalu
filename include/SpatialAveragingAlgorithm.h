@@ -124,9 +124,13 @@ private:
   //! Heights where velocity information is provided
   std::vector<double> heights_; // Array of shape [num_heights]
 
-  //! Store average value in maps from pair(partName, field_id) to average value
-  std::map<std::pair<std::string, std::string>, std::vector<double> > vectorAvg_;
-  std::map<std::pair<std::string, std::string>, double > scalarAvg_;
+  //! Store average value in maps from pair(partName, field_id) to id of average value array
+  size_t nVectorAvg_;
+  size_t nScalarAvg_;
+  std::vector<std::vector<double>> vectorAvg_;
+  std::vector<double> scalarAvg_;
+  std::map<std::pair<std::string, std::string>, size_t > vectorAvgMap_;
+  std::map<std::pair<std::string, std::string>, size_t > scalarAvgMap_;
   
   //! stk::Transfer search methods
   std::string searchMethod_;
@@ -188,25 +192,24 @@ void SpatialAveragingAlgorithm::register_part_field(
     
     std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
     if(field->field_array_rank()) {
-        if(vectorAvg_.find(partFieldPair) == vectorAvg_.end()) {
+        if(vectorAvgMap_.find(partFieldPair) != vectorAvgMap_.end()) {
             // Part - Field combination already exists. Nothing to do here  
         } else {
             VectorFieldType& vecField = meta.declare_field<VectorFieldType>(
                 stk::topology::NODE_RANK, field->name(), nStates);
             stk::mesh::put_field(vecField, *part, nDim);
-            std::vector<double> zeroVector;
-            zeroVector.resize(nDim);
-            for(int i=0; i<nDim; i++) zeroVector[i] = 0.0;
-            vectorAvg_.insert( { {part->name(), field->name()}, zeroVector } );            
+            vectorAvgMap_.insert( { {part->name(), field->name()}, nVectorAvg_ } );
+	    nVectorAvg_++;
         }
     } else {
-        if(scalarAvg_.find(partFieldPair) == scalarAvg_.end()) {
+        if(scalarAvgMap_.find(partFieldPair) != scalarAvgMap_.end()) {
             // Part - Field combination already exists. Nothing to do here  
         } else {
             ScalarFieldType& scalarField = meta.declare_field<ScalarFieldType>(
-                stk::topology::NODE_RANK, field->name(), nStates);
-            stk::mesh::put_field(scalarField, *part, nDim);
-            scalarAvg_.insert( { {part->name(), field->name()}, 0.0 } );
+                stk::topology::NODE_RANK, field->name());
+            stk::mesh::put_field(scalarField, *part);
+            scalarAvgMap_.insert( { {part->name(), field->name()}, nScalarAvg_ } );
+	    nScalarAvg_++;
         }
     }
     
@@ -220,12 +223,33 @@ void SpatialAveragingAlgorithm::eval_mean(
 
     std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
     if(field->field_array_rank()) {
-        std::vector<double> mapValue = vectorAvg_.find(partFieldPair)->second;
+
+      auto ivMap = vectorAvgMap_.find(partFieldPair);
+      if( ivMap != vectorAvgMap_.end()) {
+        const size_t ivAvg = ivMap->second;
         for(int i=0; i<nDim; i++)
-            avgValue[i] = mapValue[i];
+	  avgValue[i] = vectorAvg_[ivAvg][i];
+
+      } else {
+	NaluEnv::self().naluOutput() << "Part field pair not found. Part:" << part->name() << ", Field: " << field->name() << std::endl ;
+	NaluEnv::self().naluOutput() << "Available pairs are :" << std::endl ;
+	for (auto vavgPairs: vectorAvgMap_) {
+	  NaluEnv::self().naluOutputP0() << (vavgPairs.first).first << " " << (vavgPairs.first).second <<  std::endl ;
+	}
+      }
     } else {
-        double mapValue = scalarAvg_.find(partFieldPair)->second;
-        *avgValue = mapValue;
+      
+      auto isMap = scalarAvgMap_.find(partFieldPair);
+      if( isMap != scalarAvgMap_.end()) {
+        const size_t isAvg = isMap->second;
+        *avgValue = scalarAvg_[isAvg];
+      } else {
+	NaluEnv::self().naluOutput() << "Part field pair not found. Part:" << part->name() << ", Field: " << field->name() << std::endl ;
+	NaluEnv::self().naluOutput() << "Available pairs are :" << std::endl ;
+	for (auto savgPairs: scalarAvgMap_) {
+	  NaluEnv::self().naluOutput() << (savgPairs.first).first << " " << (savgPairs.first).second <<  std::endl ;
+	}
+      }
     }
     
 }

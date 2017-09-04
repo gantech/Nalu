@@ -37,6 +37,10 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::N
     inactiveSelector_(),
     transfers_(0),
     genPartList_(false),
+    nVectorAvg_(0),
+    nScalarAvg_(0),
+    vectorAvg_(NULL),
+    scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
     outFileFmt_("spatial_averaging_%s.dat")
@@ -55,6 +59,10 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const std::ve
     inactiveSelector_(),
     transfers_(0),
     genPartList_(false),
+    nVectorAvg_(0),
+    nScalarAvg_(0),
+    vectorAvg_(NULL),
+    scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
     outFileFmt_("")
@@ -196,15 +204,14 @@ SpatialAveragingAlgorithm::register_fields()
               ScalarFieldType& scalarField = meta.declare_field<ScalarFieldType>(
                   stk::topology::NODE_RANK, fieldName_[jField], nStates);
               stk::mesh::put_field(scalarField, *part, nDim);
-              scalarAvg_.insert( { {partNames_[iPart], fieldName_[jField]}, double(0.0) } );
+              scalarAvgMap_.insert( { {partNames_[iPart], fieldName_[jField]}, nScalarAvg_ } );
+	      nScalarAvg_++;
           } else if (fieldSize_[jField] == 3) {
               VectorFieldType& vecField = meta.declare_field<VectorFieldType>(
                   stk::topology::NODE_RANK, fieldName_[jField], nStates);
               stk::mesh::put_field(vecField, *part, nDim);
-              std::vector<double> zeroVector;
-              zeroVector.resize(nDim);
-              for(int i=0; i<nDim; i++) zeroVector[i] = 0.0;
-              vectorAvg_.insert( { {partNames_[iPart], fieldName_[jField]}, zeroVector } );
+              vectorAvgMap_.insert( { {partNames_[iPart], fieldName_[jField]}, nVectorAvg_ } );
+	      nVectorAvg_++;
           }
       }
   }
@@ -215,8 +222,12 @@ void
 SpatialAveragingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
+  int nDim = meta.spatial_dimension();
 
-  // We expect all parts to exist, so no creation step here
+  vectorAvg_.resize(nVectorAvg_);
+  for(size_t i=0; i < nVectorAvg_; i++)
+    vectorAvg_[i].resize(nDim);
+  scalarAvg_.resize(nScalarAvg_);
 
   // Add all parts to inactive selection
   for (auto key : allPartNames_) {
@@ -230,31 +241,31 @@ SpatialAveragingAlgorithm::initialize()
       << "Spatial Averaging active \n"
       << "\t Number of planes: " << allPartNames_.size() << std::endl;
 
-  // Prepare output files to dump sources when computed during precursor phase
-  if (( NaluEnv::self().parallel_rank() == 0 )) {
-    std::string uxname((boost::format(outFileFmt_)%"Ux").str());
-    std::string uyname((boost::format(outFileFmt_)%"Uy").str());
-    std::string uzname((boost::format(outFileFmt_)%"Uz").str());
-    std::fstream uxFile, uyFile, uzFile;
-    uxFile.open(uxname.c_str(), std::fstream::out);
-    uyFile.open(uyname.c_str(), std::fstream::out);
-    uzFile.open(uzname.c_str(), std::fstream::out);
+  // // Prepare output files to dump sources when computed during precursor phase
+  // if (( NaluEnv::self().parallel_rank() == 0 )) {
+  //   std::string uxname((boost::format(outFileFmt_)%"Ux").str());
+  //   std::string uyname((boost::format(outFileFmt_)%"Uy").str());
+  //   std::string uzname((boost::format(outFileFmt_)%"Uz").str());
+  //   std::fstream uxFile, uyFile, uzFile;
+  //   uxFile.open(uxname.c_str(), std::fstream::out);
+  //   uyFile.open(uyname.c_str(), std::fstream::out);
+  //   uzFile.open(uzname.c_str(), std::fstream::out);
 
-    uxFile << "# Time, " ;
-    uyFile << "# Time, " ;
-    uzFile << "# Time, " ;
-    for (size_t ih = 0; ih < heights_.size(); ih++) {
-      uxFile << heights_[ih] << ", ";
-      uyFile << heights_[ih] << ", ";
-      uzFile << heights_[ih] << ", ";
-    }
-    uxFile << std::endl ;
-    uyFile << std::endl ;
-    uzFile << std::endl ;
-    uxFile.close();
-    uyFile.close();
-    uzFile.close();
-  }
+  //   uxFile << "# Time, " ;
+  //   uyFile << "# Time, " ;
+  //   uzFile << "# Time, " ;
+  //   for (size_t ih = 0; ih < heights_.size(); ih++) {
+  //     uxFile << heights_[ih] << ", ";
+  //     uyFile << heights_[ih] << ", ";
+  //     uzFile << heights_[ih] << ", ";
+  //   }
+  //   uxFile << std::endl ;
+  //   uyFile << std::endl ;
+  //   uzFile << std::endl ;
+  //   uxFile.close();
+  //   uyFile.close();
+  //   uzFile.close();
+  // }
 }
 
 void
@@ -262,12 +273,12 @@ SpatialAveragingAlgorithm::create_transfers()
 {
   transfers_ = new Transfers(*realm_.root());
 
-  for(auto key: vectorAvg_) {
+  for(auto key: vectorAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
       populate_transfer_data(partFieldPair.second, partFieldPair.first);
   }
   
-  for(auto key: scalarAvg_) {
+  for(auto key: scalarAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
       populate_transfer_data(partFieldPair.second, partFieldPair.first);
   }
@@ -317,28 +328,25 @@ SpatialAveragingAlgorithm::calc_vector_averages()
   stk::mesh::MetaData& meta = realm_.meta_data();
   stk::mesh::BulkData& bulk = realm_.bulk_data();
   const int nDim = meta.spatial_dimension();
-  const double dt = realm_.get_time_step();
   const double currTime = realm_.get_current_time();
 
-  const size_t numParts = vectorAvg_.size();
   // Sum(vectors) and number of nodes on this processor over all planes
-  std::vector<double> sumVect(numParts * nDim, 0.0);
-  std::vector<unsigned> numNodes(numParts, 0);
+  std::vector<double> sumVect(nVectorAvg_ * nDim, 0.0);
+  std::vector<unsigned> numNodes(nVectorAvg_, 0);
   // Global sum and nodes for computing global average
-  std::vector<double> sumVectGlobal(numParts * nDim, 0.0);
-  std::vector<unsigned> totalNodes(numParts, 0);
+  std::vector<double> sumVectGlobal(nVectorAvg_ * nDim, 0.0);
+  std::vector<unsigned> totalNodes(nVectorAvg_, 0);
 
-  size_t iPart=0;
-  for(auto key: vectorAvg_) {
+  for(auto key: vectorAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
-      const int ioff = iPart * nDim;
+      const size_t ivAvg = key.second;
+      const int ioff = ivAvg * nDim;
       VectorFieldType* vectField =
           meta.get_field<VectorFieldType>(stk::topology::NODE_RANK, partFieldPair.second);
       stk::mesh::Part* part = meta.get_part(partFieldPair.first);
       stk::mesh::Selector s_local_part(*part);
       const stk::mesh::BucketVector& node_buckets =
           bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
-      
       // Calculate sum(vectors) for all nodes on this processor
       for (size_t ib = 0; ib < node_buckets.size(); ib++) {
           stk::mesh::Bucket& bukt = *node_buckets[ib];
@@ -346,32 +354,28 @@ SpatialAveragingAlgorithm::calc_vector_averages()
           
           for (size_t in = 0; in < bukt.size(); in++) {
               const int offset = in * nDim;
-              for (int i = 0; i < nDim; i++)
+              for (int i = 0; i < nDim; i++) {
                   sumVect[ioff + i] += vectFieldP[offset + i];
+	      }
           }
-          numNodes[iPart] += bukt.size();
+          numNodes[ivAvg] += bukt.size();
       }
-      iPart++;
   }
 
   // Assemble global sum and node count
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), sumVect.data(), sumVectGlobal.data(),
-    numParts * nDim);
+    nVectorAvg_ * nDim);
   // Revisit this for area or volume weighted averaging.
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
-    numParts);
+    nVectorAvg_);
 
   // Compute spatial averages
-  iPart=0;
-  for(auto key: vectorAvg_) {
-      std::vector<double> vAvg;
-      vAvg.resize(nDim);
-      for (int i = 0; i < nDim; i++)
-          vAvg[i] = sumVectGlobal[iPart*nDim + i] / totalNodes[iPart];
-      key.second = vAvg;
-      iPart++;
+  for(auto key: vectorAvgMap_) {
+      const size_t ivAvg = key.second;
+      for (int i = 0; i < nDim; i++) 
+	vectorAvg_[ivAvg][i] = sumVectGlobal[ivAvg*nDim + i] / totalNodes[ivAvg];
   }
 
   // const int tcount = realm_.get_time_step_count();
@@ -415,53 +419,48 @@ SpatialAveragingAlgorithm::calc_scalar_averages()
   stk::mesh::MetaData& meta = realm_.meta_data();
   stk::mesh::BulkData& bulk = realm_.bulk_data();
   const int nDim = meta.spatial_dimension();
-  const double dt = realm_.get_time_step();
   const double currTime = realm_.get_current_time();
 
-  const size_t numParts = scalarAvg_.size();
   // Sum(vectors) and number of nodes on this processor over all planes
-  std::vector<double> sumScal(numParts, 0.0);
-  std::vector<unsigned> numNodes(numParts, 0);
+  std::vector<double> sumScal(nScalarAvg_, 0.0);
+  std::vector<unsigned> numNodes(nScalarAvg_, 0);
   // Global sum and nodes for computing global average
-  std::vector<double> sumScalGlobal(numParts, 0.0);
-  std::vector<unsigned> totalNodes(numParts, 0);
+  std::vector<double> sumScalGlobal(nScalarAvg_, 0.0);
+  std::vector<unsigned> totalNodes(nScalarAvg_, 0);
 
-  size_t iPart=0;
-  for(auto key: scalarAvg_) {
+  for(auto key: scalarAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
+      const size_t isAvg = key.second;
       ScalarFieldType* scalField =
           meta.get_field<ScalarFieldType>(stk::topology::NODE_RANK, partFieldPair.second);
       stk::mesh::Part* part = meta.get_part(partFieldPair.first);
       stk::mesh::Selector s_local_part(*part);
       const stk::mesh::BucketVector& node_buckets =
           bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
-      
       // Calculate sum(scalars) for all nodes on this processor
       for (size_t ib = 0; ib < node_buckets.size(); ib++) {
           stk::mesh::Bucket& bukt = *node_buckets[ib];
           double* scalFieldP = stk::mesh::field_data(*scalField, bukt);
           
           for (size_t in = 0; in < bukt.size(); in++) 
-              sumScal[iPart] += scalFieldP[in];
-          numNodes[iPart] += bukt.size();
+              sumScal[isAvg] += scalFieldP[in];
+          numNodes[isAvg] += bukt.size();
       }
-      iPart++;
   }
 
   // Assemble global sum and node count
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), sumScal.data(), sumScalGlobal.data(),
-    numParts);
+    nScalarAvg_);
   // Revisit this for area or volume weighted averaging.
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
-    numParts);
+    nScalarAvg_);
 
   // Compute spatial averages
-  iPart=0;
-  for(auto key: scalarAvg_) {
-      key.second = sumScalGlobal[iPart] / totalNodes[iPart];
-      iPart++;
+  for(auto key: scalarAvgMap_) {
+      const size_t isAvg = key.second;
+      scalarAvg_[isAvg] = sumScalGlobal[isAvg] / totalNodes[isAvg];
   }
 
   // const int tcount = realm_.get_time_step_count();

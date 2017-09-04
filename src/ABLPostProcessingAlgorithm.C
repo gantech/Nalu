@@ -31,6 +31,7 @@ namespace nalu {
 
 ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node)
   : realm_(realm),
+    indepSpatAvg_(true),
     spatialAvg_(NULL),
     heights_(0),
     UmeanCalc_(0),
@@ -52,6 +53,7 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
 
 ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node, SpatialAveragingAlgorithm* spatialAvg)
   : realm_(realm),
+    indepSpatAvg_(false),
     spatialAvg_(spatialAvg),
     heights_(0),
     UmeanCalc_(0),
@@ -74,6 +76,9 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
 
 ABLPostProcessingAlgorithm::~ABLPostProcessingAlgorithm()
 {
+  if(indepSpatAvg_ && (NULL != spatialAvg_))
+    delete spatialAvg_;
+
   if (NULL != transfers_)
     delete transfers_;
 }
@@ -152,7 +157,9 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
 void
 ABLPostProcessingAlgorithm::setup()
 {
-  // Momentum sources
+
+  if(indepSpatAvg_)
+    spatialAvg_->setup() ;
   determine_part_names(
     heights_, partNames_, genPartList_, partFmt_);
   // Register fields
@@ -226,7 +233,8 @@ ABLPostProcessingAlgorithm::initialize()
   stk::mesh::MetaData& meta = realm_.meta_data();
   int nDim = meta.spatial_dimension();
  
-  // We expect all parts to exist, so no creation step here
+  if(indepSpatAvg_)
+    spatialAvg_->initialize() ;
 
   // Add all parts to inactive selection
   for (auto key : allPartNames_) {
@@ -275,6 +283,8 @@ ABLPostProcessingAlgorithm::initialize()
 void
 ABLPostProcessingAlgorithm::execute()
 {
+  if(indepSpatAvg_)
+    spatialAvg_->execute() ;
   calc_stats();
   calc_utau();  
 }
@@ -302,7 +312,7 @@ ABLPostProcessingAlgorithm::calc_stats()
   std::vector<unsigned> totalNodes(numPlanes, 0);
   for (size_t ih = 0; ih < numPlanes; ih++) {
     stk::mesh::Part* part = meta.get_part(partNames_[ih]);
-    spatialAvg_->eval_mean(velocity, part, UmeanCalc_[ih].data());
+    spatialAvg_->eval_mean(velocity, part, &(UmeanCalc_[ih][0]));
     spatialAvg_->eval_mean(temperature, part, &TmeanCalc_[ih]);
     
     const int ioff = ih * nVarStats_;
@@ -335,7 +345,7 @@ ABLPostProcessingAlgorithm::calc_stats()
   // Assemble global sum and node count
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), sumVarStats.data(), sumVarStatsGlobal.data(),
-    numPlanes * nDim);
+    numPlanes * nVarStats_);
   // Revisit this for area or volume weighted averaging.
   stk::all_reduce_sum(
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
@@ -353,12 +363,12 @@ ABLPostProcessingAlgorithm::calc_stats()
   if (( NaluEnv::self().parallel_rank() == 0 ) &&
       ( tcount % outputFreq_ == 0)) {
     std::string uMeanName((boost::format(outFileFmt_)%"U").str());
-    std::string tMeanName((boost::format(outFileFmt_)%"U").str());
+    std::string tMeanName((boost::format(outFileFmt_)%"T").str());
     std::string varName((boost::format(outFileFmt_)%"Var").str());
     std::fstream uMeanFile, tMeanFile, varFile;
     uMeanFile.open(uMeanName.c_str(), std::fstream::app);
     tMeanFile.open(tMeanName.c_str(), std::fstream::app);    
-    varFile.open(varName.c_str(), std::fstream::out);
+    varFile.open(varName.c_str(), std::fstream::app);
     uMeanFile << std::setw(12) << currTime << ", ";
     tMeanFile << std::setw(12) << currTime << ", ";    
     varFile << std::setw(12) << currTime << ", ";
