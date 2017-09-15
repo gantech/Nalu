@@ -4,6 +4,7 @@
 #include "xfer/Transfer.h"
 #include "xfer/Transfers.h"
 #include "utils/LinearInterpolation.h"
+#include "Plane2D.h"
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -29,6 +30,10 @@ namespace nalu {
 SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::Node& node)
   : realm_(realm),
     heights_(0),
+    nVectorAvg_(0),
+    nScalarAvg_(0),
+    vectorAvg_(NULL),
+    scalarAvg_(NULL),
     searchMethod_("stk_kdtree"),
     searchTolerance_(1.0e-4),
     searchExpansionFactor_(1.5),
@@ -37,10 +42,6 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::N
     inactiveSelector_(),
     transfers_(0),
     genPartList_(false),
-    nVectorAvg_(0),
-    nScalarAvg_(0),
-    vectorAvg_(NULL),
-    scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
     outFile_("spatial_averaging.dat")
@@ -51,6 +52,10 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::N
 SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const std::vector<std::string>& fromTargetNames)
   : realm_(realm),
     heights_(0),
+    nVectorAvg_(0),
+    nScalarAvg_(0),
+    vectorAvg_(NULL),
+    scalarAvg_(NULL),
     searchMethod_("stk_kdtree"),
     searchTolerance_(1.0e-4),
     searchExpansionFactor_(1.5),
@@ -59,10 +64,6 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const std::ve
     inactiveSelector_(),
     transfers_(0),
     genPartList_(false),
-    nVectorAvg_(0),
-    nScalarAvg_(0),
-    vectorAvg_(NULL),
-    scalarAvg_(NULL),
     partFmt_(""),
     outputFreq_(10),
     outFile_("")
@@ -138,8 +139,18 @@ SpatialAveragingAlgorithm::load(const YAML::Node& node)
       }
   }
 
-  const int ndim = realm_.spatialDimension_;
-  
+  get_if_present(node, "generate_parts", generateParts_, generateParts_);
+  if (generateParts_) {
+    quadVertices_ = node["quad_vertices"].as<std::vector<std::vector<double>>>();
+    ThrowAssertMsg(quadVertices_.size() == 4,
+                   "SpatialAveraging::load: Invalid data encountered when parsing 'quad_vertices'");
+    for (auto crd: quadVertices_) {
+      ThrowAssertMsg(crd.size() == 2,
+                     "SpatialAveraging::load: Invalid data encountered when parsing 'quad_vertices'");
+    }
+    nx_ = node["nx"].as<int>();
+    ny_ = node["ny"].as<int>();
+  }
 }
 
 void
@@ -160,26 +171,40 @@ SpatialAveragingAlgorithm::determine_part_names(
   std::string& nameFmt)
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
+  stk::mesh::BulkData& bulk = realm_.bulk_data();
 
   if (flag)
     for (size_t i = 0; i < heights.size(); i++)
       nameSet[i] = (boost::format(nameFmt) % heights[i]).str();
 
-  for (auto partName : nameSet) {
+  for (size_t i=0; i < heights.size(); i++) {
+    auto partName = nameSet[i];
     auto it = allPartNames_.find(partName);
     if (it != allPartNames_.end())
       continue;
 
     stk::mesh::Part* part = meta.get_part(partName);
     if (NULL == part) {
-      // TODO: Need "nodeset" creation capability. Integrate with
-      // DataProbePostProcessing to minimize code duplication.
-      throw std::runtime_error(
-        "SpatialAveragingAlgorithm::setup: Cannot find part " + partName);
-    } else {
-      // Add this part to the visited part list
-      allPartNames_.insert(partName);
+      if (!generateParts_)
+        throw std::runtime_error(
+          "SpatialAveragingAlgorithm::setup: Cannot find part " + partName);
+      else {
+        planeGenerators_.emplace_back(
+          new Plane2D(meta, bulk, partName));
+        Plane2D& plane = *planeGenerators_[planeGenerators_.size() - 1];
+        auto& vertices = plane.vertices();
+
+        for (int j=0; j<4; j++) {
+          vertices[j][0] = quadVertices_[j][0];
+          vertices[j][1] = quadVertices_[j][1];
+          vertices[j][2] = heights[i];
+        }
+        plane.set_dimensions(nx_, ny_);
+        plane.setup();
+      }
     }
+    // Add this part to the visited part list
+    allPartNames_.insert(partName);
   }
 }
 
@@ -225,6 +250,9 @@ SpatialAveragingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
   int nDim = meta.spatial_dimension();
+
+  for (auto& plane: planeGenerators_)
+    plane->initialize();
 
   vectorAvg_.resize(nVectorAvg_);
   for(size_t i=0; i < nVectorAvg_; i++)

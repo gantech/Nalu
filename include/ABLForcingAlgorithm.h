@@ -19,6 +19,7 @@ namespace nalu {
 class Realm;
 class Transfer;
 class Transfers;
+class Plane2D;
 
 /**
  * \brief ABL Forcing Source terms for Momentum and Temperature equations
@@ -253,6 +254,21 @@ private:
   //! specification takes one `%s` specifier that is used to populate Ux, Uy,
   //! Uz, T. Default is "abl_sources_%s.dat"
   std::string outFileFmt_;
+
+  //! Flag indicaing whether parts should be automatically generated
+  bool generateParts_{false};
+
+  //! Vertices of the corners of the 2-D plane structure
+  //!
+  //! An array of shape (4, 2)
+  std::vector<std::vector<double>> quadVertices_;
+
+  //! Dimensions of the grid generated in x and y directions
+  size_t nx_, ny_;
+
+  //! Vector of plane generation instances for individual heights
+  std::vector<std::unique_ptr<Plane2D>> planeGenerators_;
+
 };
 }
 }

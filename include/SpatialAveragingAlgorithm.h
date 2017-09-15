@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <unordered_set>
+#include <memory>
 
 namespace sierra {
 namespace nalu {
@@ -34,6 +35,7 @@ namespace nalu {
 class Realm;
 class Transfer;
 class Transfers;
+class Plane2D;
 
 /**
  * \brief Spatial averaging
@@ -158,6 +160,15 @@ private:
 
   //! Flag indicating whether to generate part names list for velocity field
   bool genPartList_;
+
+  //! Flag indicaing whether parts should be automatically generated
+  bool generateParts_{false};
+
+  std::vector<std::vector<double>> quadVertices_;
+
+  size_t nx_, ny_;
+
+  std::vector<std::unique_ptr<Plane2D>> planeGenerators_;
 
   //! Format string specifier for generating velocity parts list
   std::string partFmt_;
