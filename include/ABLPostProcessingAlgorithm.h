@@ -1,4 +1,3 @@
-
 #ifndef ABLPOSTPROCESSINGALGORITHM_H
 #define ABLPOSTPROCESSINGALGORITHM_H
 
@@ -23,7 +22,7 @@ class SpatialAveragingAlgorithm;
 /**
  * \brief ABL Forcing Source terms for Momentum and Temperature equations
  *
- * This class parses the user inputs and provides an planar statistics based 
+ * This class parses the user inputs and provides an planar statistics based
  * postprocessing implementation within Nalu.
  * The ABL postprocessing capability is turned on by the presence of a sub-section
  * titled `abl_postprocessing` within the Realm section of the Nalu input file.
@@ -48,7 +47,7 @@ public:
   ABLPostProcessingAlgorithm(Realm&, const YAML::Node&);
 
   ABLPostProcessingAlgorithm(Realm&, const YAML::Node&, SpatialAveragingAlgorithm* spatialAvg);
-  
+
   ~ABLPostProcessingAlgorithm();
 
   //! Parse input file for user options and initialize
@@ -97,7 +96,7 @@ private:
 
   //! Helper method to compute average friction velocity at the ABL surface
   void calc_utau();
-  
+
   //! Reference to Realm
   Realm& realm_;
 
@@ -106,24 +105,27 @@ private:
 
   //! Flag that determines whether spatialAvg_ is from Realm or just within this class
   bool indepSpatAvg_ ;
-  
+
   //! Heights where velocity information is provided
   std::vector<double> heights_; // Array of shape [num_Uheights]
 
-  //! Planar average velocity calculated on the surface [num_UHeights, 3]
+  //! Planar average symmetric sfs-stress calculated on the surface [num_heights, 6]
+  Array2D<double> SFSstressMeanCalc_;
+
+  //! Planar average velocity calculated on the surface [num_heights, 3]
   Array2D<double> UmeanCalc_;
 
   //! Planar average temperature calculated on the surface [num_THeights]
   std::vector<double> TmeanCalc_;
 
   const size_t nVarStats_ = 9 ;// <u'^2>, <v'^2>, <w'^2>, <u'v'>, <u'w'>, <v'w'>, <w'^3>, <theta'^2>, <w'theta'>
-  
+
   //! Planar variances calculated on the surface [num_UHeights, 9]
   Array2D<double> varCalc_;
 
   //! Average friction velocity at the wall
   double utauCalc_ ;
-  
+
   //! stk::Transfer search methods
   std::string searchMethod_;
   //! stk::Transfer search tolerance

@@ -1,4 +1,3 @@
-
 #include "ABLPostProcessingAlgorithm.h"
 #include "SpatialAveragingAlgorithm.h"
 #include "Realm.h"
@@ -33,7 +32,9 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
   : realm_(realm),
     indepSpatAvg_(true),
     spatialAvg_(NULL),
+    indepSpatAvg_(true),
     heights_(0),
+    SFSstressMeanCalc_(0),
     UmeanCalc_(0),
     TmeanCalc_(0),
     searchMethod_("stk_kdtree"),
@@ -55,7 +56,9 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
   : realm_(realm),
     indepSpatAvg_(false),
     spatialAvg_(spatialAvg),
+    indepSpatAvg_(false),
     heights_(0),
+    SFSstressMeanCalc_(0),
     UmeanCalc_(0),
     TmeanCalc_(0),
     searchMethod_("stk_kdtree"),
@@ -72,7 +75,7 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
 {
     load(node);
 }
-    
+
 
 ABLPostProcessingAlgorithm::~ABLPostProcessingAlgorithm()
 {
@@ -90,7 +93,7 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
   get_if_present(node, "search_tolerance", searchTolerance_, searchTolerance_);
   get_if_present(node, "search_expansion_factor", searchExpansionFactor_,
                  searchExpansionFactor_);
-  
+
   get_if_present(node, "output_frequency", outputFreq_, outputFreq_);
   get_if_present(node, "output_format", outFileFmt_, outFileFmt_);
 
@@ -142,16 +145,18 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
   if(spatialAvg_ == NULL) {
       spatialAvg_ = new SpatialAveragingAlgorithm(realm_, fromTargetNames_);
   }
-  
+
   const int ndim = realm_.spatialDimension_;
+  SFSstressMeanCalc_.resize(nHeights);
   UmeanCalc_.resize(nHeights);
   varCalc_.resize(nHeights);
   for (size_t i = 0; i < nHeights; i++) {
+      SFSstressMeanCalc_[i].resize(6);
       UmeanCalc_[i].resize(ndim);
       varCalc_[i].resize(nVarStats_);
   }
   TmeanCalc_.resize(nHeights);
-  
+
 }
 
 void
@@ -206,24 +211,25 @@ ABLPostProcessingAlgorithm::determine_part_names(
           ablWallPartVec_.push_back(part);
       }
   }
-  
+
 }
 
 void
 ABLPostProcessingAlgorithm::register_fields()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
-  int nDim = meta.spatial_dimension();
-  int nStates = realm_.number_of_states();
-  
+
   for (auto key : partNames_) {
     stk::mesh::Part* part = meta.get_part(key);
+    GenericFieldType* sfsStress = meta.get_field<GenericFieldType>
+        (stk::topology::NODE_RANK, "sfs_stress");
+    spatialAvg_->register_part_field<GenericFieldType>(part, sfsStress, 6);
     VectorFieldType* vel = meta.get_field<VectorFieldType>
         (stk::topology::NODE_RANK, "velocity");
-    spatialAvg_->register_part_field<VectorFieldType>(part, vel);
+    spatialAvg_->register_part_field<VectorFieldType>(part, vel, 3);
     ScalarFieldType* temp = meta.get_field<ScalarFieldType>(
         stk::topology::NODE_RANK, "temperature");
-    spatialAvg_->register_part_field<ScalarFieldType>(part, temp);
+    spatialAvg_->register_part_field<ScalarFieldType>(part, temp, 1);
   }
 }
 
@@ -231,8 +237,7 @@ void
 ABLPostProcessingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
-  int nDim = meta.spatial_dimension();
- 
+
   if(indepSpatAvg_)
     spatialAvg_->initialize() ;
 
@@ -252,29 +257,31 @@ ABLPostProcessingAlgorithm::initialize()
     std::string uMeanName((boost::format(outFileFmt_)%"U").str());
     std::string tMeanName((boost::format(outFileFmt_)%"T").str());
     std::string varName((boost::format(outFileFmt_)%"Var").str());
-    std::string uTauName((boost::format(outFileFmt_)%"uTau").str());    
+    std::string uTauName((boost::format(outFileFmt_)%"uTau").str());
     std::fstream uMeanFile, tMeanFile, varFile, uTauFile;
     uMeanFile.open(uMeanName.c_str(), std::fstream::out);
     tMeanFile.open(tMeanName.c_str(), std::fstream::out);
     varFile.open(varName.c_str(), std::fstream::out);
-    uTauFile.open(uTauName.c_str(), std::fstream::out);    
+    uTauFile.open(uTauName.c_str(), std::fstream::out);
     uMeanFile << "# Time, " ;
     tMeanFile << "# Time, " ;
     varFile << "# Time, " ;
-    uTauFile << "# Time, " ;    
+    uTauFile << "# Time, " ;
     for (size_t ih = 0; ih < heights_.size(); ih++) {
-      for (size_t iDim = 0; iDim < nDim; iDim++)
+      for (size_t iDim = 0; iDim < 3; iDim++)
           uMeanFile << heights_[ih] << ", ";
-      tMeanFile << heights_[ih] << ", ";      
+      tMeanFile << heights_[ih] << ", ";
       for (size_t iVarStat = 0; iVarStat < nVarStats_; iVarStat++)
+          varFile << heights_[ih] << ", ";
+      for (size_t iSFSstress = 0; iSFSstress < 6; iSFSstress++)
           varFile << heights_[ih] << ", ";
     }
     uMeanFile << std::endl ;
-    tMeanFile << std::endl ;    
+    tMeanFile << std::endl ;
     varFile << std::endl ;
     uTauFile << std::endl ;
     uMeanFile.close();
-    tMeanFile.close();    
+    tMeanFile.close();
     varFile.close() ;
     uTauFile.close();
   }
@@ -286,7 +293,7 @@ ABLPostProcessingAlgorithm::execute()
   if(indepSpatAvg_)
     spatialAvg_->execute() ;
   calc_stats();
-  calc_utau();  
+  calc_utau();
 }
 
 void
@@ -294,10 +301,10 @@ ABLPostProcessingAlgorithm::calc_stats()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
   stk::mesh::BulkData& bulk = realm_.bulk_data();
-  const int nDim = meta.spatial_dimension();
-  const double dt = realm_.get_time_step();
   const double currTime = realm_.get_current_time();
 
+  GenericFieldType* sfs_stress =
+      meta.get_field<GenericFieldType>(stk::topology::NODE_RANK, "sfs_stress");
   VectorFieldType* velocity =
     meta.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
   ScalarFieldType* temperature =
@@ -312,9 +319,11 @@ ABLPostProcessingAlgorithm::calc_stats()
   std::vector<unsigned> totalNodes(numPlanes, 0);
   for (size_t ih = 0; ih < numPlanes; ih++) {
     stk::mesh::Part* part = meta.get_part(partNames_[ih]);
-    spatialAvg_->eval_mean(velocity, part, &(UmeanCalc_[ih][0]));
-    spatialAvg_->eval_mean(temperature, part, &TmeanCalc_[ih]);
-    
+
+    spatialAvg_->eval_mean(sfs_stress, part, &(SFSstressMeanCalc_[ih][0]), 6);
+    spatialAvg_->eval_mean(velocity, part, &(UmeanCalc_[ih][0]), 3);
+    spatialAvg_->eval_mean(temperature, part, &TmeanCalc_[ih], 1);
+
     const int ioff = ih * nVarStats_;
     stk::mesh::Selector s_local_part(*part);
     const stk::mesh::BucketVector& node_buckets =
@@ -327,7 +336,7 @@ ABLPostProcessingAlgorithm::calc_stats()
       double* tempField = stk::mesh::field_data(*temperature, bukt);
 
       for (size_t in = 0; in < bukt.size(); in++) {
-        const int offset = in * nDim;
+        const int offset = in * 3;
         sumVarStats[ioff + 0] += (velField[offset + 0] - UmeanCalc_[ih][0])*(velField[offset + 0] - UmeanCalc_[ih][0]); //<u'^2>
         sumVarStats[ioff + 1] += (velField[offset + 1] - UmeanCalc_[ih][1])*(velField[offset + 1] - UmeanCalc_[ih][1]); //<v'^2>
         sumVarStats[ioff + 2] += (velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<w'^2>
@@ -336,7 +345,7 @@ ABLPostProcessingAlgorithm::calc_stats()
         sumVarStats[ioff + 5] += (velField[offset + 1] - UmeanCalc_[ih][1])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<v'w'>
         sumVarStats[ioff + 6] += (velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2])*(velField[offset + 2] - UmeanCalc_[ih][2]); //<w'^3>
         sumVarStats[ioff + 7] += (tempField[in] - TmeanCalc_[ih])*(tempField[in] - TmeanCalc_[ih]); //<theta'^2>
-        sumVarStats[ioff + 8] += (velField[offset + 2] - UmeanCalc_[ih][2])*(tempField[in] - TmeanCalc_[ih]); //<w'theta'>        
+        sumVarStats[ioff + 8] += (velField[offset + 2] - UmeanCalc_[ih][2])*(tempField[in] - TmeanCalc_[ih]); //<w'theta'>
       }
       numNodes[ih] += bukt.size();
     }
@@ -354,7 +363,7 @@ ABLPostProcessingAlgorithm::calc_stats()
   // Compute variances and covariances
   for (size_t ih = 0; ih < numPlanes; ih++) {
     const size_t ioff = ih * nVarStats_;
-    for (int i = 0; i < nVarStats_; i++) {
+    for (size_t i = 0; i < nVarStats_; i++) {
       varCalc_[ih][i] = sumVarStatsGlobal[ioff + i] / totalNodes[ih];
     }
   }
@@ -367,13 +376,13 @@ ABLPostProcessingAlgorithm::calc_stats()
     std::string varName((boost::format(outFileFmt_)%"Var").str());
     std::fstream uMeanFile, tMeanFile, varFile;
     uMeanFile.open(uMeanName.c_str(), std::fstream::app);
-    tMeanFile.open(tMeanName.c_str(), std::fstream::app);    
+    tMeanFile.open(tMeanName.c_str(), std::fstream::app);
     varFile.open(varName.c_str(), std::fstream::app);
     uMeanFile << std::setw(12) << currTime << ", ";
-    tMeanFile << std::setw(12) << currTime << ", ";    
+    tMeanFile << std::setw(12) << currTime << ", ";
     varFile << std::setw(12) << currTime << ", ";
     for (size_t ih = 0; ih < heights_.size(); ih++) {
-      for (size_t iDim = 0; iDim < nDim; iDim++)
+      for (size_t iDim = 0; iDim < 3; iDim++)
           uMeanFile << std::setprecision(6)
                     << std::setw(15)
                     << UmeanCalc_[ih][iDim] << ", ";
@@ -384,16 +393,20 @@ ABLPostProcessingAlgorithm::calc_stats()
           varFile << std::setprecision(6)
                   << std::setw(15)
                   << varCalc_[ih][iVarStat] << ", ";
-     
+      for (size_t iSFSstress = 0; iSFSstress < 6; iSFSstress++)
+          varFile << std::setprecision(6)
+                  << std::setw(15)
+                  << SFSstressMeanCalc_[ih][iSFSstress] << ", ";
+
     }
     uMeanFile << std::endl;
-    tMeanFile << std::endl;    
+    tMeanFile << std::endl;
     varFile << std::endl ;
     uMeanFile.close();
     tMeanFile.close();
     varFile.close() ;
   }
-  
+
 }
 
 
@@ -403,11 +416,10 @@ ABLPostProcessingAlgorithm::calc_utau()
 
     std::array<double, 2> uTauAreaSumLocal{0.0, 0.0}; // First value hold uTau * area, second value holds area. To get average utau, sum both quantities over all processes and divide one by another.
     std::array<double, 2> uTauAreaSumGlobal{0.0, 0.0};
-    
+
     stk::mesh::MetaData & meta_data = realm_.meta_data();
-    const int nDim = meta_data.spatial_dimension();
     const double currTime = realm_.get_current_time();
-    
+
     GenericFieldType* exposedAreaVec = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "exposed_area_vector");
     GenericFieldType* wallFrictionVelocityBip = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "wall_friction_velocity_bip");
     stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
@@ -436,9 +448,9 @@ ABLPostProcessingAlgorithm::calc_utau()
             // loop over face nodes
             for ( int ip = 0; ip < numScsBip; ++ip ) {
 
-                const int offSetAveraVec = ip*nDim;
+                const int offSetAveraVec = ip*3;
                 double aMag = 0.0;
-                for ( int j = 0; j < nDim; ++j ) {
+                for ( int j = 0; j < 3; ++j ) {
                     const double axj = areaVec[offSetAveraVec+j];
                     aMag += axj*axj;
                 }
@@ -461,30 +473,29 @@ ABLPostProcessingAlgorithm::calc_utau()
         std::string uTauName((boost::format(outFileFmt_)%"uTau").str());
         std::fstream uTauFile;
         uTauFile.open(uTauName.c_str(), std::fstream::app);
-        uTauFile << std::setw(12) << currTime << ", ";    
+        uTauFile << std::setw(12) << currTime << ", ";
         uTauFile << std::setprecision(6)
                  << std::setw(15)
                  << utauCalc_ ;
         uTauFile << std::endl;
         uTauFile.close();
     }
-    
+
 }
 
 void
 ABLPostProcessingAlgorithm::eval_vel_mean(
   const double zp, std::vector<double>& velMean)
 {
-  const int nDim = realm_.spatialDimension_;
   if (heights_.size() == 1) {
     // Constant source term throughout the domain
-    for (int i = 0; i < nDim; i++) {
+    for (int i = 0; i < 3; i++) {
       velMean[i] = UmeanCalc_[i][0];
     }
   } else {
     // Linearly interpolate source term within the planes, maintain constant
     // source term above and below the heights provided
-    for (int i = 0; i < nDim; i++) {
+    for (int i = 0; i < 3; i++) {
       utils::linear_interp(heights_, UmeanCalc_[i], zp, velMean[i]);
     }
   }

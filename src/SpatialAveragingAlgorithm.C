@@ -1,4 +1,3 @@
-
 #include "SpatialAveragingAlgorithm.h"
 #include "Realm.h"
 #include "xfer/Transfer.h"
@@ -30,21 +29,24 @@ namespace nalu {
 SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::Node& node)
   : realm_(realm),
     heights_(0),
+    nSymmTensorAvg_(0),
     nVectorAvg_(0),
     nScalarAvg_(0),
-    vectorAvg_(NULL),
-    scalarAvg_(NULL),
+    symmTensorAvg_(),
+    vectorAvg_(),
+    scalarAvg_(),
     searchMethod_("stk_kdtree"),
     searchTolerance_(1.0e-4),
     searchExpansionFactor_(1.5),
     fromTargetNames_(0),
     partNames_(),
     inactiveSelector_(),
+    fieldName_(),
+    fieldSize_(),
     transfers_(0),
     genPartList_(false),
     partFmt_(""),
-    outputFreq_(10),
-    outFile_("spatial_averaging.dat")
+    outputFreq_(10)
 {
   load(node);
 }
@@ -52,24 +54,27 @@ SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const YAML::N
 SpatialAveragingAlgorithm::SpatialAveragingAlgorithm(Realm& realm, const std::vector<std::string>& fromTargetNames)
   : realm_(realm),
     heights_(0),
+    nSymmTensorAvg_(0),
     nVectorAvg_(0),
     nScalarAvg_(0),
-    vectorAvg_(NULL),
-    scalarAvg_(NULL),
+    symmTensorAvg_(),
+    vectorAvg_(),
+    scalarAvg_(),
     searchMethod_("stk_kdtree"),
     searchTolerance_(1.0e-4),
     searchExpansionFactor_(1.5),
     fromTargetNames_(fromTargetNames),
     partNames_(),
     inactiveSelector_(),
+    fieldName_(),
+    fieldSize_(),
     transfers_(0),
     genPartList_(false),
     partFmt_(""),
-    outputFreq_(10),
-    outFile_("")
+    outputFreq_(10)
 {
 }
-    
+
 SpatialAveragingAlgorithm::~SpatialAveragingAlgorithm()
 {
   if (NULL != transfers_)
@@ -83,7 +88,7 @@ SpatialAveragingAlgorithm::load(const YAML::Node& node)
   get_if_present(node, "search_tolerance", searchTolerance_, searchTolerance_);
   get_if_present(node, "search_expansion_factor", searchExpansionFactor_,
                  searchExpansionFactor_);
-  
+
   get_if_present(node, "output_frequency", outputFreq_, outputFreq_);
   get_if_present(node, "output_file", outFile_, outFile_);
 
@@ -127,13 +132,13 @@ SpatialAveragingAlgorithm::load(const YAML::Node& node)
           // find the name, size and type
           const YAML::Node fieldNameNode = y_output["field_name"];
           const YAML::Node fieldSizeNode = y_output["field_size"];
-    
-          if ( !fieldNameNode ) 
+
+          if ( !fieldNameNode )
               throw std::runtime_error("SpatialAveraging::load() Sorry, field name must be provided");
-            
-          if ( !fieldSizeNode ) 
+
+          if ( !fieldSizeNode )
               throw std::runtime_error("SpatialAveraging::load() Sorry, field size must be provided");
-          
+
           fieldName_.push_back(fieldNameNode.as<std::string>());
           fieldSize_.push_back(fieldSizeNode.as<int>()) ;
       }
@@ -254,6 +259,11 @@ SpatialAveragingAlgorithm::initialize()
   for (auto& plane: planeGenerators_)
     plane->initialize();
 
+  const int stressSize = nDim == 3 ? 6 : 3;
+
+  symmTensorAvg_.resize(nSymmTensorAvg_);
+  for(size_t i=0; i < nSymmTensorAvg_; i++)
+    symmTensorAvg_[i].resize(stressSize);
   vectorAvg_.resize(nVectorAvg_);
   for(size_t i=0; i < nVectorAvg_; i++)
     vectorAvg_[i].resize(nDim);
@@ -284,11 +294,16 @@ SpatialAveragingAlgorithm::create_transfers()
 {
   transfers_ = new Transfers(*realm_.root());
 
+  for(auto key: symmTensorAvgMap_) {
+      const std::pair<std::string, std::string> partFieldPair = key.first;
+      populate_transfer_data(partFieldPair.second, partFieldPair.first);
+  }
+
   for(auto key: vectorAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
       populate_transfer_data(partFieldPair.second, partFieldPair.first);
   }
-  
+
   for(auto key: scalarAvgMap_) {
       const std::pair<std::string, std::string> partFieldPair = key.first;
       populate_transfer_data(partFieldPair.second, partFieldPair.first);
@@ -315,7 +330,7 @@ SpatialAveragingAlgorithm::populate_transfer_data(
     stk::mesh::Part* part = meta.get_part(key);
     theXfer->fromPartVec_.push_back(part);
   }
-  
+
   stk::mesh::Part* part = meta.get_part(partName);
   theXfer->toPartVec_.push_back(part);
 
@@ -331,6 +346,89 @@ SpatialAveragingAlgorithm::execute()
   transfers_->execute();
   calc_scalar_averages();
   calc_vector_averages();
+  calc_symmTensor_averages();
+}
+
+void
+SpatialAveragingAlgorithm::calc_symmTensor_averages()
+{
+  stk::mesh::MetaData& meta = realm_.meta_data();
+  stk::mesh::BulkData& bulk = realm_.bulk_data();
+  const int nDim = meta.spatial_dimension();
+  const int stressSize = nDim == 3 ? 6 : 3;
+  const double currTime = realm_.get_current_time();
+
+  // Sum(symmTensors) and number of nodes on this processor over all planes
+  std::vector<double> sumSymmTens(nSymmTensorAvg_ * stressSize, 0.0);
+  std::vector<unsigned> numNodes(nSymmTensorAvg_, 0);
+  // Global sum and nodes for computing global average
+  std::vector<double> sumSymmTensGlobal(nSymmTensorAvg_ * stressSize, 0.0);
+  std::vector<unsigned> totalNodes(nSymmTensorAvg_, 0);
+
+  for(auto key: symmTensorAvgMap_) {
+      const std::pair<std::string, std::string> partFieldPair = key.first;
+      const size_t istAvg = key.second;
+      const int ioff = istAvg * stressSize;
+      GenericFieldType* symmTensorField =
+          meta.get_field<GenericFieldType>(stk::topology::NODE_RANK, partFieldPair.second);
+      stk::mesh::Part* part = meta.get_part(partFieldPair.first);
+      stk::mesh::Selector s_local_part(*part);
+      const stk::mesh::BucketVector& node_buckets =
+          bulk.get_buckets(stk::topology::NODE_RANK, s_local_part);
+      // Calculate sum(symmTensors) for all nodes on this processor
+      for (size_t ib = 0; ib < node_buckets.size(); ib++) {
+          stk::mesh::Bucket& bukt = *node_buckets[ib];
+          double* symmTensorFieldP = stk::mesh::field_data(*symmTensorField, bukt);
+
+          for (size_t in = 0; in < bukt.size(); in++) {
+              const int offset = in * stressSize;
+              for (int i = 0; i < stressSize; i++) {
+                  sumSymmTens[ioff + i] += symmTensorFieldP[offset + i];
+	      }
+          }
+          numNodes[istAvg] += bukt.size();
+      }
+  }
+  
+  // Assemble global sum and node count
+  stk::all_reduce_sum(
+    NaluEnv::self().parallel_comm(), sumSymmTens.data(), sumSymmTensGlobal.data(),
+    nSymmTensorAvg_ * stressSize);
+  // Revisit this for area or volume weighted averaging.
+  stk::all_reduce_sum(
+    NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
+    nSymmTensorAvg_);
+
+  // Compute spatial averages
+  for(auto key: symmTensorAvgMap_) {
+      const size_t istAvg = key.second;
+      for (int i = 0; i < stressSize; i++)
+	symmTensorAvg_[istAvg][i] = sumSymmTensGlobal[istAvg*stressSize + i] / totalNodes[istAvg];
+
+  }
+
+  // Write averages to file if necessary
+  const int tcount = realm_.get_time_step_count();
+  if (( NaluEnv::self().parallel_rank() == 0 ) &&
+      ( tcount % outputFreq_ == 0)) {
+      std::fstream spAvgFile;
+      spAvgFile.open(outFile_.c_str(), std::fstream::app);
+      spAvgFile << "Time: " << std::setw(12) << currTime << std::endl;
+      for(auto key: symmTensorAvgMap_) {
+          const size_t istAvg = key.second;
+          if(symmTensorIO_[istAvg]) {
+              spAvgFile << "Part: " << (key.first).first << " Field: " << (key.first).second ;
+              for (int i = 0; i < stressSize; i++)
+                  spAvgFile << std::setprecision(6)
+                            << std::setw(15)
+                            << symmTensorAvg_[istAvg][i];
+              spAvgFile << std::endl ;
+          }
+      }
+      spAvgFile << std::endl;
+      spAvgFile.close();
+  }
+
 }
 
 void
@@ -362,7 +460,7 @@ SpatialAveragingAlgorithm::calc_vector_averages()
       for (size_t ib = 0; ib < node_buckets.size(); ib++) {
           stk::mesh::Bucket& bukt = *node_buckets[ib];
           double* vectFieldP = stk::mesh::field_data(*vectField, bukt);
-          
+
           for (size_t in = 0; in < bukt.size(); in++) {
               const int offset = in * nDim;
               for (int i = 0; i < nDim; i++) {
@@ -382,10 +480,10 @@ SpatialAveragingAlgorithm::calc_vector_averages()
     NaluEnv::self().parallel_comm(), numNodes.data(), totalNodes.data(),
     nVectorAvg_);
 
-  // Compute spatial averages 
+  // Compute spatial averages
   for(auto key: vectorAvgMap_) {
       const size_t ivAvg = key.second;
-      for (int i = 0; i < nDim; i++) 
+      for (int i = 0; i < nDim; i++)
 	vectorAvg_[ivAvg][i] = sumVectGlobal[ivAvg*nDim + i] / totalNodes[ivAvg];
 
   }
@@ -401,7 +499,7 @@ SpatialAveragingAlgorithm::calc_vector_averages()
           const size_t ivAvg = key.second;
           if(vectorIO_[ivAvg]) {
               spAvgFile << "Part: " << (key.first).first << " Field: " << (key.first).second ;
-              for (int i = 0; i < nDim; i++)                  
+              for (int i = 0; i < nDim; i++)
                   spAvgFile << std::setprecision(6)
                             << std::setw(15)
                             << vectorAvg_[ivAvg][i];
@@ -411,7 +509,6 @@ SpatialAveragingAlgorithm::calc_vector_averages()
       spAvgFile << std::endl;
       spAvgFile.close();
   }
- 
 }
 
 void
@@ -419,7 +516,6 @@ SpatialAveragingAlgorithm::calc_scalar_averages()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
   stk::mesh::BulkData& bulk = realm_.bulk_data();
-  const int nDim = meta.spatial_dimension();
   const double currTime = realm_.get_current_time();
 
   // Sum(vectors) and number of nodes on this processor over all planes
@@ -442,8 +538,8 @@ SpatialAveragingAlgorithm::calc_scalar_averages()
       for (size_t ib = 0; ib < node_buckets.size(); ib++) {
           stk::mesh::Bucket& bukt = *node_buckets[ib];
           double* scalFieldP = stk::mesh::field_data(*scalField, bukt);
-          
-          for (size_t in = 0; in < bukt.size(); in++) 
+
+          for (size_t in = 0; in < bukt.size(); in++)
               sumScal[isAvg] += scalFieldP[in];
           numNodes[isAvg] += bukt.size();
       }

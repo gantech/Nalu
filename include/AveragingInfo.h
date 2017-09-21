@@ -28,7 +28,7 @@ namespace nalu{
 class AveragingInfo
 {
 public:
-  
+
   AveragingInfo();
   ~AveragingInfo();
 
@@ -40,6 +40,7 @@ public:
   bool computeTke_;
   bool computeFavreStress_;
   bool computeFavreTke_;
+  bool computeSFSStress_;
   bool computeVorticity_;
   bool computeQcriterion_;
   bool computeLambdaCI_;

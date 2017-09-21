@@ -36,12 +36,12 @@ class AveragingInfo;
 class TurbulenceAveragingPostProcessing
 {
 public:
-  
+
   TurbulenceAveragingPostProcessing(
     Realm &realm,
     const YAML::Node &node);
   ~TurbulenceAveragingPostProcessing();
-  
+
   // load all of the options
   void load(
     const YAML::Node & node);
@@ -68,7 +68,7 @@ public:
     stk::mesh::MetaData &metaData,
     stk::mesh::Part *targetPart);
 
-  void review( 
+  void review(
     const AveragingInfo *avInfo);
 
   // populate nodal field and output norms (if appropriate)
@@ -93,6 +93,10 @@ public:
     const double &zeroCurrent,
     const double &dt,
     stk::mesh::Selector s_all_nodes);
+
+  void compute_sfs_stress(
+      const std::string &averageBlockName,
+      stk::mesh::Selector s_all_nodes);
 
   void compute_vorticity(
     const std::string &averageBlockName,
