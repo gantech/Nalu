@@ -30,7 +30,6 @@ namespace nalu {
 
 ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node)
   : realm_(realm),
-    indepSpatAvg_(true),
     spatialAvg_(NULL),
     indepSpatAvg_(true),
     heights_(0),
@@ -54,7 +53,6 @@ ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML:
 
 ABLPostProcessingAlgorithm::ABLPostProcessingAlgorithm(Realm& realm, const YAML::Node& node, SpatialAveragingAlgorithm* spatialAvg)
   : realm_(realm),
-    indepSpatAvg_(false),
     spatialAvg_(spatialAvg),
     indepSpatAvg_(false),
     heights_(0),

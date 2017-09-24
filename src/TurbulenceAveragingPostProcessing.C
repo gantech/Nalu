@@ -124,9 +124,9 @@ TurbulenceAveragingPostProcessing::load(
             std::string fieldName = y_var.as<std::string>() ;
             if ( fieldName != "density")
               avInfo->favreFieldNameVec_.push_back(fieldName);
-          } 
+          }
         }
-        
+
         // check for stress and tke post processing; Reynolds and Favre
         get_if_present(y_spec, "compute_reynolds_stress", avInfo->computeReynoldsStress_, avInfo->computeReynoldsStress_);
         get_if_present(y_spec, "compute_tke", avInfo->computeTke_, avInfo->computeTke_);
@@ -191,7 +191,7 @@ TurbulenceAveragingPostProcessing::setup()
         // push back
         avInfo->partVec_.push_back(targetPart);
       }
-      
+
       // register special fields whose name prevails over the averaging info name
       if ( avInfo->computeTke_ ) {
         const std::string tkeName = "resolved_turbulent_ke";
@@ -396,7 +396,7 @@ TurbulenceAveragingPostProcessing::review(
     NaluEnv::self().naluOutputP0() << "Primitive/Favre name:    " << primitiveFB->name() << "/" <<  averageFB->name()
                                    << " size " << avInfo->favreFieldSizeVec_[iav] << std::endl;
   }
-  
+
   if ( avInfo->computeTke_ ) {
     NaluEnv::self().naluOutputP0() << "TKE will be computed; add resolved_turbulent_ke to the Reynolds/Favre block for mean"<< std::endl;
   }
@@ -804,8 +804,9 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
       size_t componentCount = 0;
       for ( int i = 0; i < nDim; ++i ) {
           for ( int j = i; j < nDim; ++j ) {
-              const double divUTerm = ( i == j ) ? 2.0/3.0*divU - sfstke : 0.0;
-              sfsstress_[k*offSet + componentCount] = (-density_[k]*turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm));
+              const double divUTerm = ( i == j ) ? 2.0/3.0*divU : 0.0;
+              const double sfsTKEterm = ( i == j ) ? 2.0/3.0*sfstke : 0.0;
+              sfsstress_[k*offSet + componentCount] = -density_[k]*(turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm) + 2.0/3.0*sfsTKEterm);
               componentCount++;
           }
       }
