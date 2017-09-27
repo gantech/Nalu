@@ -762,6 +762,7 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
   stk::mesh::MetaData & metaData = realm_.meta_data();
 
   const int nDim = realm_.spatialDimension_;
+  const double invNdim = 1.0/nDim;
   const std::string SFSStressFieldName = "sfs_stress";
 
   bool computeSFSTKE = false;
@@ -770,6 +771,7 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
   stk::mesh::FieldBase *Density_ = metaData.get_field(stk::topology::NODE_RANK, "density");
   stk::mesh::FieldBase *TurbKe_ = metaData.get_field(stk::topology::NODE_RANK, "turbulent_ke");
   if(TurbKe_ == NULL) computeSFSTKE = true ;
+  stk::mesh::FieldBase *DualNodalVolume_ = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
   stk::mesh::FieldBase *DuDx_ = metaData.get_field(stk::topology::NODE_RANK, "dudx");
   stk::mesh::FieldBase *SFSStress = metaData.get_field(stk::topology::NODE_RANK, SFSStressFieldName);
 
@@ -785,6 +787,7 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
     double * turbKe_;
     if (!computeSFSTKE)
         turbKe_ = (double*)stk::mesh::field_data(*TurbKe_, b);
+    const double * dualNodalVolume_ = (double*)stk::mesh::field_data(*DualNodalVolume_, b);
     const double * density_ = (double*)stk::mesh::field_data(*Density_, b);
     const double * dudx_ = (double*)stk::mesh::field_data(*DuDx_, b);
     double *sfsstress_ = (double*)stk::mesh::field_data(*SFSStress,b);
@@ -797,7 +800,17 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
           divU += dudx_[k*offSet+(nDim*j+j)] ;
       double sfstke = 0.0;
       if(computeSFSTKE) {
-          sfstke = 0.0; // TODO: UPDATE ESTIMATION OF sfs-tke from strain rate.
+          // Use method of Yoshisawa (1986) - Statistical theory for compressible turbulent shear flows, with the application to subgrid modeling, 29, 2152.
+          double Ci = 0.9;
+          double sijMag = 0.0;
+          for ( int i = 0; i < nDim; ++i ) {
+              for ( int j = 0; j < nDim; ++j ) {
+                  const double rateOfStrain = 0.5*(dudx_[k*offSet+nDim*i+j] + dudx_[k*offSet+nDim*j+i]);
+                  sijMag += rateOfStrain*rateOfStrain;
+              }
+          }
+          sijMag = std::sqrt(2.0*sijMag);
+          sfstke = 2.0 * Ci * std::pow(dualNodalVolume_[k], 2.0*invNdim) * sijMag;
       } else {
           sfstke = turbKe_[k];
       }
@@ -806,7 +819,7 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
           for ( int j = i; j < nDim; ++j ) {
               const double divUTerm = ( i == j ) ? 2.0/3.0*divU : 0.0;
               const double sfsTKEterm = ( i == j ) ? 2.0/3.0*sfstke : 0.0;
-              sfsstress_[k*offSet + componentCount] = -density_[k]*(turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm) + 2.0/3.0*sfsTKEterm);
+              sfsstress_[k*offSet + componentCount] = -density_[k]*(turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm) - sfsTKEterm);
               componentCount++;
           }
       }
