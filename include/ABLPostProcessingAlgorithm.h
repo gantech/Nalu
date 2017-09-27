@@ -19,10 +19,11 @@ class Realm;
 class Transfer;
 class Transfers;
 class SpatialAveragingAlgorithm;
+class Plane2D;
 /**
- * \brief ABL Forcing Source terms for Momentum and Temperature equations
+ * \brief ABL Postprocessing to generate ABL specific planar statistics
  *
- * This class parses the user inputs and provides an planar statistics based
+ * This class parses the user inputs and provides a planar statistics based
  * postprocessing implementation within Nalu.
  * The ABL postprocessing capability is turned on by the presence of a sub-section
  * titled `abl_postprocessing` within the Realm section of the Nalu input file.
@@ -151,6 +152,15 @@ private:
 
   //! Flag indicating whether to generate part names list for velocity field
   bool genPartList_;
+
+  //! Flag indicaing whether parts should be automatically generated
+  bool generateParts_{false};
+
+  std::vector<std::vector<double>> quadVertices_;
+
+  size_t nx_, ny_;
+
+  std::vector<std::unique_ptr<Plane2D>> planeGenerators_;
 
   //! Format string specifier for generating velocity parts list
   std::string partFmt_;

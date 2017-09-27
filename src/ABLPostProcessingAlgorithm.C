@@ -5,6 +5,7 @@
 #include "xfer/Transfer.h"
 #include "xfer/Transfers.h"
 #include "utils/LinearInterpolation.h"
+#include "Plane2D.h"
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -140,6 +141,19 @@ ABLPostProcessingAlgorithm::load(const YAML::Node& node)
           "No abl_wall_parts specified for ABL postprocessing function");
   }
 
+  get_if_present(node, "generate_parts", generateParts_, generateParts_);
+  if (generateParts_) {
+      quadVertices_ = node["quad_vertices"].as<std::vector<std::vector<double>>>();
+      ThrowAssertMsg(quadVertices_.size() == 4,
+                     "ABLPostProcessing::load: Invalid data encountered when parsing 'quad_vertices'");
+      for (auto crd: quadVertices_) {
+          ThrowAssertMsg(crd.size() == 2,
+                         "ABLPostProcessing::load: Invalid data encountered when parsing 'quad_vertices'");
+      }
+      nx_ = node["nx"].as<int>();
+      ny_ = node["ny"].as<int>();
+  }
+  
   if(spatialAvg_ == NULL) {
       spatialAvg_ = new SpatialAveragingAlgorithm(realm_, fromTargetNames_);
   }
@@ -177,26 +191,40 @@ ABLPostProcessingAlgorithm::determine_part_names(
   std::string& nameFmt)
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
+  stk::mesh::BulkData& bulk = realm_.bulk_data();
 
   if (flag)
     for (size_t i = 0; i < heights.size(); i++)
       nameSet[i] = (boost::format(nameFmt) % heights[i]).str();
 
-  for (auto partName : nameSet) {
+  for (size_t i=0; i < heights.size(); i++) {
+    auto partName = nameSet[i];
     auto it = allPartNames_.find(partName);
     if (it != allPartNames_.end())
       continue;
 
     stk::mesh::Part* part = meta.get_part(partName);
     if (NULL == part) {
-      // TODO: Need "nodeset" creation capability. Integrate with
-      // DataProbePostProcessing to minimize code duplication.
-      throw std::runtime_error(
-        "ABLPostProcessingAlgorithm::setup: Cannot find part " + partName);
-    } else {
-      // Add this part to the visited part list
-      allPartNames_.insert(partName);
-    }
+        if (!generateParts_)
+            throw std::runtime_error(
+                "ABLPostProcessingAlgorithm::setup: Cannot find part " + partName);
+        else {
+            planeGenerators_.emplace_back(
+                new Plane2D(meta, bulk, partName));
+            Plane2D& plane = *planeGenerators_[planeGenerators_.size() - 1];
+            auto& vertices = plane.vertices();
+
+            for (int j=0; j<4; j++) {
+                vertices[j][0] = quadVertices_[j][0];
+                vertices[j][1] = quadVertices_[j][1];
+                vertices[j][2] = heights[i];
+            }
+            plane.set_dimensions(nx_, ny_);
+            plane.setup();
+        }
+    } 
+    // Add this part to the visited part list
+    allPartNames_.insert(partName);
   }
 
   for (auto partName : ablWallNames_) {
@@ -235,6 +263,9 @@ void
 ABLPostProcessingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
+
+  for (auto& plane: planeGenerators_)
+    plane->initialize();
 
   if(indepSpatAvg_)
     spatialAvg_->initialize() ;
