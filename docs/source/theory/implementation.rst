@@ -1,7 +1,11 @@
 Implementation
 --------------
 
-**WARNING: All information here could be factually incorrect. If you find anything wrong, feel free to put in a pull request.** This page contains my attempt to document the implementation of the algorithms previsouly described in this manual in Nalu.
+.. warning::
+
+   All information here could be factually incorrect. If you find anything wrong, feel free to put in a pull request.
+
+This page contains my attempt to document the implementation of the algorithms previsouly described in this manual in Nalu.
 
 Nodal Gradient
 ++++++++++++++
