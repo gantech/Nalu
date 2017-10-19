@@ -4,6 +4,7 @@
 #include "xfer/Transfer.h"
 #include "xfer/Transfers.h"
 #include "utils/LinearInterpolation.h"
+#include "Plane2D.h"
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -101,6 +102,19 @@ ABLForcingAlgorithm::load(const YAML::Node& node)
     (tempSrcType_ != ABLForcingAlgorithm::OFF)) {
     throw std::runtime_error(
       "No from_target_part specified for ABL forcing function");
+  }
+
+  get_if_present(node, "generate_planes", generateParts_, generateParts_);
+  if (generateParts_) {
+    quadVertices_ = node["quad_vertices"].as<std::vector<std::vector<double>>>();
+    ThrowAssertMsg(quadVertices_.size() == 4,
+                   "ABLForcingAlgorithm::load: Invalid data encountered when parsing 'quad_vertices'");
+    for (auto crd: quadVertices_) {
+      ThrowAssertMsg(crd.size() == 2,
+                     "ABLForcingAlgorithm::load: Invalid data encountered when parsing 'quad_vertices'");
+    }
+    nx_ = node["nx"].as<int>();
+    ny_ = node["ny"].as<int>();
   }
 }
 
@@ -264,26 +278,40 @@ ABLForcingAlgorithm::determine_part_names(
   std::string& nameFmt)
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
+  stk::mesh::BulkData& bulk = realm_.bulk_data();
 
   if (flag)
     for (size_t i = 0; i < heights.size(); i++)
       nameSet[i] = (boost::format(nameFmt) % heights[i]).str();
 
-  for (auto partName : nameSet) {
+  for (size_t i=0; i < heights.size(); i++) {
+    auto partName = nameSet[i];
     auto it = allPartNames_.find(partName);
     if (it != allPartNames_.end())
       continue;
 
     stk::mesh::Part* part = meta.get_part(partName);
     if (NULL == part) {
-      // TODO: Need "nodeset" creation capability. Integrate with
-      // DataProbePostProcessing to minimize code duplication.
-      throw std::runtime_error(
-        "ABLForcingAlgorithm::setup: Cannot find part " + partName);
-    } else {
-      // Add this part to the visited part list
-      allPartNames_.insert(partName);
+      if (!generateParts_)
+        throw std::runtime_error(
+          "ABLForcingAlgorithm::setup: Cannot find part " + partName);
+      else {
+        planeGenerators_.emplace_back(
+          new Plane2D(meta, bulk, partName));
+        Plane2D& plane = *planeGenerators_[planeGenerators_.size() - 1];
+        auto& vertices = plane.vertices();
+
+        for (int j=0; j<4; j++) {
+          vertices[j][0] = quadVertices_[j][0];
+          vertices[j][1] = quadVertices_[j][1];
+          vertices[j][2] = heights[i];
+        }
+        plane.set_dimensions(nx_, ny_);
+        plane.setup();
+      }
     }
+    // Add this part to the visited part list
+    allPartNames_.insert(partName);
   }
 }
 
@@ -321,7 +349,8 @@ ABLForcingAlgorithm::initialize()
 {
   stk::mesh::MetaData& meta = realm_.meta_data();
 
-  // We expect all parts to exist, so no creation step here
+  for (auto& plane: planeGenerators_)
+    plane->initialize();
 
   // Add all parts to inactive selection
   for (auto key : allPartNames_) {
