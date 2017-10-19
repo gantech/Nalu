@@ -41,7 +41,9 @@ MomentumBoussinesqSrcNodeSuppAlg::MomentumBoussinesqSrcNodeSuppAlg(
 {
   // save off fields
   stk::mesh::MetaData & meta_data = realm_.meta_data();
-  temperature_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
+  coordinates_ = meta_data.get_field<VectorFieldType>(
+    stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  // temperature_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
   dualNodalVolume_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
 
   // extract user parameters from solution options
@@ -72,7 +74,22 @@ MomentumBoussinesqSrcNodeSuppAlg::node_execute(
   stk::mesh::Entity node)
 {
   // no lhs contribution; all rhs source term; density should be constant...
-  const double temperature = *stk::mesh::field_data(*temperature_, node );
+  // const double temperature = *stk::mesh::field_data(*temperature_, node );
+  const double* coord = stk::mesh::field_data(*coordinates_, node);
+  const double zheight = coord[2];
+
+  double temperature = 300.0;
+  // Hack in theta variation
+  if (zheight <= 650.0) {
+    temperature = 300.0;
+  }
+  else if (zheight <= 750) {
+    temperature = 300.0 + (zheight - 650.0) * 0.08; // 8K per 100m
+  }
+  else {
+    temperature = 308.0 + (zheight - 750.0) * 0.003; // 3K per km
+  }
+
   const double dualVolume = *stk::mesh::field_data(*dualNodalVolume_, node );
   const double fac = -rhoRef_*beta_*(temperature - tRef_)*dualVolume;
   for ( int i = 0; i < nDim_; ++i ) {
