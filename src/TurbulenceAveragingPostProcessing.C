@@ -224,7 +224,6 @@ TurbulenceAveragingPostProcessing::setup()
         // push back
         avInfo->partVec_.push_back(targetPart);
       }
-      
       if (!avInfo->movingAvgFieldNameVec_.empty()) {
         // create movingAvgPP if it hasn't been created due to physics needs
         if (movingAvgPP_ == nullptr) {
@@ -256,6 +255,7 @@ TurbulenceAveragingPostProcessing::setup()
           movingAvgPP_->add_parts_for_field(name, {targetPart});
         }
       }
+
 
       // register special fields whose name prevails over the averaging info name
       if ( avInfo->computeTke_ ) {
