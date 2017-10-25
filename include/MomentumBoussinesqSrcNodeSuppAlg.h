@@ -37,7 +37,6 @@ public:
 
   ScalarFieldType *temperature_;
   ScalarFieldType *dualNodalVolume_;
-  VectorFieldType *coordinates_;
   double tRef_;
   double rhoRef_;
   double beta_;
