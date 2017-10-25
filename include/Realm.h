@@ -71,8 +71,10 @@ class Transfer;
 class SolutionNormPostProcessing;
 class TurbulenceAveragingPostProcessing;
 class DataProbePostProcessing;
+class SpatialAveragingAlgorithm;
 class ActuatorLine;
 class ABLForcingAlgorithm;
+class ABLPostProcessingAlgorithm;
 
 class TensorProductQuadratureRule;
 class LagrangeBasis;
@@ -413,8 +415,10 @@ class Realm {
   SolutionNormPostProcessing *solutionNormPostProcessing_;
   TurbulenceAveragingPostProcessing *turbulenceAveragingPostProcessing_;
   DataProbePostProcessing *dataProbePostProcessing_;
+  SpatialAveragingAlgorithm *spatialAveraging_;
   ActuatorLine *actuatorLine_;
   ABLForcingAlgorithm *ablForcingAlg_;
+  ABLPostProcessingAlgorithm *ablPostProcessingAlg_;  
 
   std::vector<Algorithm *> propertyAlg_;
   std::map<PropertyIdentifier, ScalarFieldType *> propertyMap_;

@@ -1,0 +1,307 @@
+#ifndef SPATIALAVERAGINGALGORITHM_H
+#define SPATIALAVERAGINGALGORITHM_H
+
+#include "NaluParsing.h"
+#include "FieldTypeDef.h"
+#include "Realm.h"
+#include "xfer/Transfer.h"
+#include "xfer/Transfers.h"
+#include "utils/LinearInterpolation.h"
+
+// stk_mesh/base/fem
+#include <stk_mesh/base/BulkData.hpp>
+#include <stk_mesh/base/Entity.hpp>
+#include <stk_mesh/base/Field.hpp>
+#include <stk_mesh/base/GetBuckets.hpp>
+#include <stk_mesh/base/Selector.hpp>
+#include <stk_mesh/base/MetaData.hpp>
+#include <stk_mesh/base/Part.hpp>
+
+#include <stk_io/IossBridge.hpp>
+
+#include <stk_util/parallel/ParallelReduce.hpp>
+
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <sstream>
+#include <unordered_set>
+#include <memory>
+
+namespace sierra {
+namespace nalu {
+
+class Realm;
+class Transfer;
+class Transfers;
+class Plane2D;
+
+/**
+ * \brief Spatial averaging
+ *
+ * This class parses the user inputs and provides an spatial average within Nalu.
+ * The SpatialAveraging capability is turned on by the presence of a sub-section
+ * titled `spatial_averaging` within the Realm section of the Nalu input file.
+ *
+ * ```
+ *   spatial_averaging:
+ *     search_method: stk_kdtree
+ *     search_tolerance: 0.0001
+ *     search_expansion_factor: 1.5
+ *     output_frequency: 10
+ *     from_target_part: [Unspecified-2-HEX]
+ *     target_part: [Unspecified-2-QUAD, Unspecified-3-QUAD]
+ *     target_part_format: "zplane_%.1f"
+ *     heights: [80.0, 160.0]
+ *     variables:
+ *        - field_name: velocity
+ *          field_size: 3
+ *
+ *        - field_name: temperature
+ *          field_size: 1
+ * ```
+ *
+ */
+class SpatialAveragingAlgorithm
+{
+public:
+  template <typename T>
+  using Array2D = std::vector<std::vector<T>>;
+
+  SpatialAveragingAlgorithm(Realm&, const YAML::Node&);
+  SpatialAveragingAlgorithm(Realm&, const std::vector<std::string>& fromTargetNames);
+
+  ~SpatialAveragingAlgorithm();
+
+  //! Parse input file for user options and initialize
+  void load(const YAML::Node&);
+
+  //! Setup ABL postprocessing (steps before mesh creation)
+  void setup();
+
+  //! Register part-field combination to average
+  template<typename FieldType>
+      void register_part_field(stk::mesh::Part* part, FieldType* field, size_t fieldSize);
+
+  //! Initialize ABL postprocessing (steps after mesh creation)
+  void initialize();
+
+  //! Execute field transfers, compute planar averaging of fields
+  //! on parts
+  void execute();
+
+  //! Evaluate the spatial average at
+  template<typename FieldType>
+      void eval_mean(FieldType * field, stk::mesh::Part * part, double * avgValue, size_t fieldSize) ;
+
+  //! Inactive selector representing union of all the parts
+  inline stk::mesh::Selector& inactive_selector() { return inactiveSelector_; }
+
+private:
+  SpatialAveragingAlgorithm();
+  SpatialAveragingAlgorithm(const SpatialAveragingAlgorithm&);
+
+  //! Helper method that determines the part corresponding to a desired
+  //! vertical level and ensures that part exists in the mesh database.
+  void determine_part_names(
+    std::vector<double>&, std::vector<std::string>&, bool, std::string&);
+
+  //! Register fields on the appropriate parts based on user input.
+  void register_fields();
+
+  //! Create transfer that handles mapping of fields from
+  //! fluidRealm to the planar nodesets.
+  void create_transfers();
+
+  void populate_transfer_data(const std::string &, const std::string &);
+
+  //! Calculate averages
+  void calc_scalar_averages();
+  void calc_vector_averages();
+  void calc_symmTensor_averages();
+
+  //! Reference to Realm
+  Realm& realm_;
+
+  //! Heights where velocity information is provided
+  std::vector<double> heights_; // Array of shape [num_heights]
+
+  //! Store average value in maps from pair(partName, field_id) to id of average value array
+  size_t nSymmTensorAvg_;
+  size_t nVectorAvg_;
+  size_t nScalarAvg_;
+  std::vector<std::vector<double>> symmTensorAvg_;
+  std::vector<std::vector<double>> vectorAvg_;
+  std::vector<double> scalarAvg_;
+  std::vector<bool> symmTensorIO_;
+  std::vector<bool> vectorIO_;
+  std::vector<bool> scalarIO_;
+  std::map<std::pair<std::string, std::string>, size_t > symmTensorAvgMap_;
+  std::map<std::pair<std::string, std::string>, size_t > vectorAvgMap_;
+  std::map<std::pair<std::string, std::string>, size_t > scalarAvgMap_;
+
+  //! stk::Transfer search methods
+  std::string searchMethod_;
+  //! stk::Transfer search tolerance
+  double searchTolerance_;
+  //! stk::Transfer search expansion factor
+  double searchExpansionFactor_;
+
+  //! Domains where velocity/temperature are averaged
+  std::vector<std::string> fromTargetNames_;
+
+  //! Part names
+  std::vector<std::string> partNames_;
+  std::unordered_set<std::string> allPartNames_;
+
+  stk::mesh::PartVector allParts_;
+  stk::mesh::Selector inactiveSelector_;
+
+  std::vector<std::string> fieldName_;
+  std::vector<int> fieldSize_;
+
+  Transfers* transfers_;
+
+  //! Flag indicating whether to generate part names list for velocity field
+  bool genPartList_;
+
+  //! Flag indicaing whether parts should be automatically generated
+  bool generateParts_{false};
+
+  std::vector<std::vector<double>> quadVertices_;
+
+  size_t nx_, ny_;
+
+  std::vector<std::unique_ptr<Plane2D>> planeGenerators_;
+
+  //! Format string specifier for generating velocity parts list
+  std::string partFmt_;
+
+  //! width for output
+  int w_;
+
+ //! Write frequency for source term output
+  int outputFreq_;
+
+  //! File name for output. Default is "spatial_average.dat"
+  std::string outFile_;
+};
+
+template<typename FieldType>
+void SpatialAveragingAlgorithm::register_part_field(
+    stk::mesh::Part* part, FieldType* field, size_t fieldSize)
+{
+    stk::mesh::MetaData& meta = realm_.meta_data();
+    size_t nDim = meta.spatial_dimension();
+
+    auto it = allPartNames_.find(part->name());
+    if (it != allPartNames_.end()) {
+        // Part already exists. Nothing to do here
+    } else {
+        allPartNames_.insert(part->name());
+        VectorFieldType& coords = meta.declare_field<VectorFieldType>(
+            stk::topology::NODE_RANK, "coordinates");
+        stk::mesh::put_field(coords, *part, nDim);
+    }
+
+    std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
+    if( ((fieldSize == 6) && (nDim == 3)) || ((fieldSize == 3) && (nDim == 2))) {
+        if(symmTensorAvgMap_.find(partFieldPair) != symmTensorAvgMap_.end()) {
+            // Part - Field combination already exists. Nothing to do here
+        } else {
+	  NaluEnv::self().naluOutput() << "Creating field " << field->name() << " in part" << part->name() << std::endl;
+            GenericFieldType& symmTensorField = meta.declare_field<GenericFieldType>(
+										     stk::topology::NODE_RANK, field->name(), field->number_of_states());
+            stk::mesh::put_field(symmTensorField, *part, fieldSize);
+            symmTensorAvgMap_.insert( { {part->name(), field->name()}, nSymmTensorAvg_ } );
+            symmTensorIO_.push_back(false);
+	    nSymmTensorAvg_++;
+        }
+    } else if(fieldSize == nDim){
+        if(vectorAvgMap_.find(partFieldPair) != vectorAvgMap_.end()) {
+            // Part - Field combination already exists. Nothing to do here
+        } else {
+            VectorFieldType& vecField = meta.declare_field<VectorFieldType>(
+									    stk::topology::NODE_RANK, field->name(), field->number_of_states());
+            stk::mesh::put_field(vecField, *part, nDim);
+            vectorAvgMap_.insert( { {part->name(), field->name()}, nVectorAvg_ } );
+            vectorIO_.push_back(false);
+	    nVectorAvg_++;
+        }
+    } else if(fieldSize == 1){
+        if(scalarAvgMap_.find(partFieldPair) != scalarAvgMap_.end()) {
+            // Part - Field combination already exists. Nothing to do here
+        } else {
+            ScalarFieldType& scalarField = meta.declare_field<ScalarFieldType>(
+									       stk::topology::NODE_RANK, field->name(), field->number_of_states());
+            stk::mesh::put_field(scalarField, *part);
+            scalarAvgMap_.insert( { {part->name(), field->name()}, nScalarAvg_ } );
+            scalarIO_.push_back(true);
+	    nScalarAvg_++;
+        }
+    }
+
+}
+
+template<typename FieldType>
+void SpatialAveragingAlgorithm::eval_mean(
+    FieldType* field, stk::mesh::Part* part, double * avgValue, size_t fieldSize)
+{
+    const size_t nDim = realm_.spatialDimension_;
+
+    std::pair<std::string, std::string> partFieldPair(part->name(), field->name());
+    if( ((fieldSize == 6) && (nDim == 3)) || ((fieldSize == 3) && (nDim == 2))) {
+
+        auto istMap = symmTensorAvgMap_.find(partFieldPair);
+        if( istMap != symmTensorAvgMap_.end()) {
+            const size_t istAvg = istMap->second;
+            for(size_t i=0; i < fieldSize; i++)
+                avgValue[i] = symmTensorAvg_[istAvg][i];
+
+        } else {
+            NaluEnv::self().naluOutput() << "Part field pair not found. Part:" << part->name() << ", Field: " << field->name() << std::endl ;
+            NaluEnv::self().naluOutput() << "Available pairs are :" << std::endl ;
+            for (auto stavgPairs: symmTensorAvgMap_) {
+                NaluEnv::self().naluOutputP0() << (stavgPairs.first).first << " " << (stavgPairs.first).second <<  std::endl ;
+            }
+        }
+
+    } else if(fieldSize == nDim) {
+
+        auto ivMap = vectorAvgMap_.find(partFieldPair);
+        if( ivMap != vectorAvgMap_.end()) {
+            const size_t ivAvg = ivMap->second;
+            for(size_t i=0; i < nDim; i++)
+                avgValue[i] = vectorAvg_[ivAvg][i];
+
+        } else {
+            NaluEnv::self().naluOutput() << "Part field pair not found. Part:" << part->name() << ", Field: " << field->name() << std::endl ;
+            NaluEnv::self().naluOutput() << "Available pairs are :" << std::endl ;
+            for (auto vavgPairs: vectorAvgMap_) {
+                NaluEnv::self().naluOutputP0() << (vavgPairs.first).first << " " << (vavgPairs.first).second <<  std::endl ;
+            }
+        }
+
+    } else {
+
+        auto isMap = scalarAvgMap_.find(partFieldPair);
+        if( isMap != scalarAvgMap_.end()) {
+            const size_t isAvg = isMap->second;
+            *avgValue = scalarAvg_[isAvg];
+        } else {
+            NaluEnv::self().naluOutput() << "Part field pair not found. Part:" << part->name() << ", Field: " << field->name() << std::endl ;
+            NaluEnv::self().naluOutput() << "Available pairs are :" << std::endl ;
+            for (auto savgPairs: scalarAvgMap_) {
+                NaluEnv::self().naluOutput() << (savgPairs.first).first << " " << (savgPairs.first).second <<  std::endl ;
+            }
+        }
+    }
+
+}
+
+
+}
+}
+
+#endif /* SPATIALAVERAGINGALGORITHM_H */
+

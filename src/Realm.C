@@ -61,6 +61,8 @@
 #include <SolutionNormPostProcessing.h>
 #include <TurbulenceAveragingPostProcessing.h>
 #include <DataProbePostProcessing.h>
+#include <SpatialAveragingAlgorithm.h>
+#include <ABLPostProcessingAlgorithm.h>
 
 // actuator line
 #include <ActuatorLine.h>
@@ -187,8 +189,10 @@ namespace nalu{
     solutionNormPostProcessing_(NULL),
     turbulenceAveragingPostProcessing_(NULL),
     dataProbePostProcessing_(NULL),
+    spatialAveraging_(NULL),
     actuatorLine_(NULL),
     ablForcingAlg_(NULL),
+    ablPostProcessingAlg_(NULL),   
     nodeCount_(0),
     estimateMemoryOnly_(false),
     availableMemoryPerCoreGB_(0),
@@ -302,6 +306,12 @@ Realm::~Realm()
 
   // Delete abl forcing pointer
   if (NULL != ablForcingAlg_) delete ablForcingAlg_;
+
+  // Delete abl postprocessing pointer
+  if (NULL != ablPostProcessingAlg_) delete ablPostProcessingAlg_;
+
+  // Delete spatial averaging pointer
+  if (NULL != spatialAveraging_) delete spatialAveraging_;
 }
 
 void
@@ -554,11 +564,24 @@ Realm::look_ahead_and_creation(const YAML::Node & node)
     actuatorLine_ =  new ActuatorLine(*this, *foundActuatorLine[0]);
   }
 
+  // Spatial averaging postprocessing
+  if (node["spatial_averaging"]) {
+      const YAML::Node spatialAvgNode = node["spatial_averaging"];
+      spatialAveraging_ = new SpatialAveragingAlgorithm(*this, spatialAvgNode);
+  }
+
   // ABL Forcing parameters
   if (node["abl_forcing"]) {
     const YAML::Node ablNode = node["abl_forcing"];
     ablForcingAlg_ = new ABLForcingAlgorithm(*this, ablNode);
   }
+
+  // ABL postprocessing
+  if (node["abl_postprocessing"]) {
+      const YAML::Node ablppNode = node["abl_postprocessing"];
+      ablPostProcessingAlg_ = new ABLPostProcessingAlgorithm(*this, ablppNode);
+  }
+
 }
   
 //--------------------------------------------------------------------------
@@ -872,6 +895,10 @@ Realm::setup_post_processing_algorithms()
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->setup();
 
+  // check for spatial averaging
+  if ( NULL != spatialAveraging_ )
+    spatialAveraging_->setup();
+  
   // check for actuator line
   if ( NULL != actuatorLine_ )
     actuatorLine_->setup();
@@ -879,6 +906,9 @@ Realm::setup_post_processing_algorithms()
   if ( NULL != ablForcingAlg_)
     ablForcingAlg_->setup();
 
+  if ( NULL != ablPostProcessingAlg_)
+    ablPostProcessingAlg_->setup();
+  
   // check for norm nodal fields
   if ( NULL != solutionNormPostProcessing_ )
     solutionNormPostProcessing_->setup();
@@ -2362,14 +2392,23 @@ Realm::initialize_post_processing_algorithms()
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->initialize();
 
+  if ( NULL != spatialAveraging_) {
+      spatialAveraging_->initialize();
+  }
+
   // check for actuator line... probably a better place for this
   if ( NULL != actuatorLine_ ) {
     actuatorLine_->initialize();
   }
 
+  if ( NULL != ablPostProcessingAlg_) {
+    ablPostProcessingAlg_->initialize();
+  }
+
   if ( NULL != ablForcingAlg_) {
     ablForcingAlg_->initialize();
   }
+  
 }
 
 //--------------------------------------------------------------------------
@@ -4390,6 +4429,13 @@ Realm::post_converged_work()
 
   if ( NULL != dataProbePostProcessing_ )
     dataProbePostProcessing_->execute();
+
+  if ( NULL != spatialAveraging_ )
+      spatialAveraging_->execute();
+  
+  if ( NULL != ablPostProcessingAlg_ )
+    ablPostProcessingAlg_->execute();
+  
 }
 
 //--------------------------------------------------------------------------
@@ -4735,7 +4781,12 @@ Realm::get_inactive_selector()
     ? (ablForcingAlg_->inactive_selector())
     : stk::mesh::Selector());
   
-  return inactiveOverSetSelector | inactiveDataProbeSelector | inactiveABLForcing;
+  stk::mesh::Selector inactiveABLPostProcessing = (
+      ( NULL != ablPostProcessingAlg_)
+      ? (ablPostProcessingAlg_->inactive_selector())
+      : stk::mesh::Selector());
+  
+  return inactiveOverSetSelector | inactiveDataProbeSelector | inactiveABLForcing | inactiveABLPostProcessing;
 }
 
 //--------------------------------------------------------------------------
