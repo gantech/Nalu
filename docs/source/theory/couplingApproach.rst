@@ -105,3 +105,92 @@ given by,
 
 For the sake of this write-up, let :math:`{\bf L_1} = {\bf L_2}` and
 :math:`\tau_2 = \tau_3`.
+
+Derivation
+++++++++++
+
+Domino's :cite:`Domino:2006` generalized sequence for the incremental pressure projection method with stabilization is (with the change from :math:`p^{n+1/2}` and :math:`p^{n-1/2}` to :math:`p^{n+1}` and :math:`p^{n}`
+
+.. math::
+   :label: pres-proj-sequence
+
+   {\bf A} \Delta \widehat{u} &= f - {\bf G} p^{n} - {\bf A} u^n \\
+   -{\bf L_1} \Delta p^{n+1} &= D \left ( \widehat{u} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
+   u^{n+1} &= \widehat{u} - \tau_3 {\bf G} \Delta p^{n+1}
+           
+   
+where
+
+.. math::
+
+   \Delta \widehat{u} &= \widehat{u} - u^n \\
+   \Delta p^{n+1} &= p^{n+1} - p^{n}
+
+and :math:`L_1` and :math:`L_2` are Laplacian operators such that
+
+.. math::
+
+   L_1 \phi &= \tau_1 \nabla \phi \cdot d {\bf A} \\
+   L_2 \phi &= \tau_2 \nabla \phi \cdot d {\bf A}   
+
+
+Expanding Eq. :eq:`pres-proj-sequence`,
+
+.. math::
+
+   
+   {\bf A} (\widehat{u} - u^n) &= f - {\bf G} p^{n} - {\bf A} u^n \\
+   -{\bf L_1} (p^{n+1}-p^{n}) &= -{\bf D} \left ( \widehat{u} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
+   {\bf A} u^{n+1} &= {\bf A} \widehat{u} - \tau_3 {\bf G} \Delta p^{n+1} \\
+   & \cdots \\
+   {\bf A} \left (u^{n+1} + \tau_3 {\bf G} \Delta p^{n+1} \right ) &= f - {\bf G} p^{n} \\
+   -{\bf L_1} \Delta p^{n+1} &= -{\bf D} \left ( u^{n+1} + \tau_3 {\bf G} \Delta p^{n+1} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
+   & \cdots \\
+   {\bf A} u^{n+1} + {\bf G} p^{n+1} + {\bf A} \tau_3 {\bf G} \Delta p^{n+1} &= f - {\bf G} p^{n} + {\bf G} p^{n+1}  \\
+   {\bf D} u^{n+1} &= {\bf L_1} \Delta p^{n+1} - {\bf D} \tau_3 {\bf G} \Delta p^{n+1} - {\bf D} \tau_2 {\bf G} p^{n} + {\bf L_2} p^{n} + b \\
+   & \cdots \\
+   {\bf A} u^{n+1} + {\bf G} p^{n+1} &= ({\bf I}- \tau_3 {\bf A} )  {\bf G} \Delta p^{n+1} \\
+   {\bf D} u^{n+1} &= \left ({\bf L_1} - {\bf D} \tau_3 {\bf G} \right ) \Delta p^{n+1} + \left ({\bf L_2} - {\bf D} \tau_2 {\bf G} \right ) p^{n}
+
+
+Hence the discrete momentum and continuity equations in matrix form with errors becomes
+
+   
+.. math::
+   :label: mom-continuity-nalu
+
+   \left[
+       \begin{array}{lr}
+         {\bf A}  &  {\bf G}  \\
+         {\bf D}  &  {\bf 0}
+       \end{array}
+     \right]
+   %
+     \left[
+       \begin{array}{l}
+         {\bf u}^{n+1}  \\
+         p^{n+1} 
+       \end{array}
+     \right] =
+   %
+     \left[
+       \begin{array}{l}
+         {\bf f}  \\
+         0
+       \end{array}
+     \right]    + 
+      \left[
+       \begin{array}{l}
+         ({\bf I}- \tau_3 {\bf A } ){\bf G}(p^{n+1}-p^{n}) \\ 
+         \epsilon({\bf L_i},\tau_i, {\bf D}, {\bf G})
+     \end{array}
+     \right] 
+
+
+where the error term that appears for the discrete continuity solve is given by,
+
+.. math::
+   :label: contErrorDefined
+
+   \epsilon ({\bf L_i}, \tau_i, {\bf D}, {\bf G}) &= ({\bf L_1}-{\bf D}\tau_3{\bf G}) (p^{n+1}-p^{n}) \\
+   & \; -  ({\bf L_2}-{\bf D}\tau_2{\bf G})  p^{n}

@@ -244,104 +244,28 @@ The correction to make :math:`u^{**}` satisfy the continuity equation is
 
 .. math::
 
-   u_i^{n+1} = u_i^{**} - \tau {\bf G} \Delta P^{**}
-   
-.. math::
-   :label: 
+   u_i^{n+1} = u_i^{**} - \frac{\tau}{\rho} {\bf G} \Delta P^{**}
 
-   u^{n+1} &= u^{**} - \tau_3 {\bf G} \Delta p^{n+1} \\
-   0 = {\bf D}(u^{n+1}) &= {\bf D} (\widehat{u}) - {\bf D }( \tau_3 {\bf G} \Delta p^{n+1} ) \\
-   0 &= {\bf D} (\widehat{u}) - {\bf D }( \tau_3 {\bf G} p^{n+1} ) + {\bf D }( \tau_3 {\bf G} p^{n} ) \\
-   -{\bf L_1} \Delta p^{n+1} &= {\bf D} (\widehat{u} + \tau_3 {\bf G} p^{n}) - {\bf D }( \tau_3 {\bf G} p^{n+1} ) - {\bf L_1} \Delta p^{n+1} \\
-   -{\bf L_1} \Delta p^{n+1} &= {\bf D} (\widehat{u} + \tau_3 {\bf G} p^{n}) - {\bf D }( \tau_3 {\bf G} p^{n+1} ) - {\bf L_1} p^{n+1} + {\bf L_1} p^{n}  
-   
-Domino's :cite:`Domino:2006` generalized sequence for the incremental pressure projection method with stabilization is (with the change from :math:`p^{n+1/2}` and :math:`p^{n-1/2}` to :math:`p^{n+1}` and :math:`p^{n}`
+
+The continuity equation to satisfied is
 
 .. math::
-   :label: pres-proj-sequence
-
-   {\bf A} \Delta \widehat{u} &= f - {\bf G} p^{n} - {\bf A} u^n \\
-   -{\bf L_1} \Delta p^{n+1} &= D \left ( \widehat{u} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
-   u^{n+1} &= \widehat{u} - \tau_3 {\bf G} \Delta p^{n+1}
+   :label: eq-continuity
            
-   
-where
+   {\bf D } \rho u^{n+1} = b + \left ({\bf L_1} - {\bf D} \tau_3 {\bf G} \right ) \Delta p^{n+1} + \left ({\bf L_2} - {\bf D} \tau_2 {\bf G} \right ) p^{n}
 
-.. math::
-
-   \Delta \widehat{u} &= \widehat{u} - u^n \\
-   \Delta p^{n+1} &= p^{n+1} - p^{n}
-
-and :math:`L_1` and :math:`L_2` are Laplacian operators such that
-
-.. math::
-
-   L_1 \phi &= \tau_1 \nabla \phi \cdot d {\bf A} \\
-   L_2 \phi &= \tau_2 \nabla \phi \cdot d {\bf A}   
-
-
-Expanding Eq. :eq:`pres-proj-sequence`,
-
-.. math::
-
-   
-   {\bf A} (\widehat{u} - u^n) &= f - {\bf G} p^{n} - {\bf A} u^n \\
-   -{\bf L_1} (p^{n+1}-p^{n}) &= -{\bf D} \left ( \widehat{u} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
-   {\bf A} u^{n+1} &= {\bf A} \widehat{u} - \tau_3 {\bf G} \Delta p^{n+1} \\
-   & \cdots \\
-   {\bf A} \left (u^{n+1} + \tau_3 {\bf G} \Delta p^{n+1} \right ) &= f - {\bf G} p^{n} \\
-   -{\bf L_1} \Delta p^{n+1} &= -{\bf D} \left ( u^{n+1} + \tau_3 {\bf G} \Delta p^{n+1} + \tau_2 {\bf G} p^{n} \right ) + {\bf L_2} p^{n} + b \\
-   & \cdots \\
-   {\bf A} u^{n+1} + {\bf G} p^{n+1} + {\bf A} \tau_3 {\bf G} \Delta p^{n+1} &= f - {\bf G} p^{n} + {\bf G} p^{n+1}  \\
-   {\bf D} u^{n+1} &= {\bf L_1} \Delta p^{n+1} - {\bf D} \tau_3 {\bf G} \Delta p^{n+1} - {\bf D} \tau_2 {\bf G} p^{n} + {\bf L_2} p^{n} + b \\
-   & \cdots \\
-   {\bf A} u^{n+1} + {\bf G} p^{n+1} &= ({\bf I}- \tau_3 {\bf A} )  {\bf G} \Delta p^{n+1} \\
-   {\bf D} u^{n+1} &= \left ({\bf L_1} - {\bf D} \tau_3 {\bf G} \right ) \Delta p^{n+1} + \left ({\bf L_2} - {\bf D} \tau_2 {\bf G} \right ) \Delta p^{n+1}
-
-
-Hence the discrete momentum and continuity equations in matrix form with errors becomes
-
+where :math:`b` contains any source terms when the velocity field is not divergence free and the other terms are the errors due to pressure stabilization as shown by Domino :cite:`Domino:2006`.
    
 .. math::
-   :label: mom-continuity-nalu
+   :label: eq-pressure
 
-   \left[
-       \begin{array}{lr}
-         {\bf A}  &  {\bf G}  \\
-         {\bf D}  &  {\bf 0}
-       \end{array}
-     \right]
-   %
-     \left[
-       \begin{array}{l}
-         {\bf u}^{n+1}  \\
-         p^{n+1} 
-       \end{array}
-     \right] =
-   %
-     \left[
-       \begin{array}{l}
-         {\bf f}  \\
-         0
-       \end{array}
-     \right]    + 
-      \left[
-       \begin{array}{l}
-         ({\bf I}- \tau_3 {\bf A } ){\bf G}(p^{n+1}-p^{n}) \\ 
-         \epsilon({\bf L_i},\tau_i, {\bf D}, {\bf G})
-     \end{array}
-     \right] 
-
-
-where the error term that appears for the discrete continuity solve is given by,
-
-.. math::
-   :label: contErrorDefined
-
-   \epsilon ({\bf L_i}, \tau_i, {\bf D}, {\bf G}) &= \left ( ({\bf L_1}-{\bf D}\tau_3{\bf G}) \right .\\
-   &- \left . ({\bf L_2}-{\bf D}\tau_2{\bf G}) \right ) (p^{n+1}-p^{n})
-
-
+   u^{n+1} &= u^{**} - \frac{\tau_3}{\rho} {\bf G} \Delta p^{n+1} \\
+   b + \left ({\bf L_1} - {\bf D} \tau_3 {\bf G} \right ) \Delta p^{n+1} &+ \left ({\bf L_2} - {\bf D} \tau_2 {\bf G} \right ) p^{n} \\
+   &= {\bf D}(\rho u^{n+1}) = {\bf D} ( \rho \widehat{u}) - {\bf D }( \tau_3 {\bf G} \Delta p^{n+1} ) \\
+   b + {\bf L_1} \Delta p^{n+1} &= {\bf D} (\rho \widehat{u}) - \left ({\bf L_2} - {\bf D} \tau_2 {\bf G} \right ) p^{n} \\
+   -{\bf L_1} \Delta p^{n+1} &= {\bf D} \rho \widehat{u} + {\bf D} \tau_2 {\bf G} p^{n} - {\bf L_2} p^{n} \\
+   -{\bf L_1} \Delta p^{n+1} &= - {\bf D} \rho \widehat{u} - {\bf D} \tau_2 {\bf G} p^{n} + {\bf L_2} p^{n} + b
+  
 Implementation in code
 ++++++++++++++++++++++
 
@@ -597,17 +521,86 @@ From Sec. :ref:`advStab`, the viscous term term of the Favre averaged momentum e
    }
    
 
+The implementation of the continuity equation in Nalu solves equation :eq:`eq-pressure` for the difference in pressure :math:`\Delta p^{n+1}` in the integral form.
 
+.. math::
+   :label: eq-continuity-implementation
+      
+   \int & \left ( -{\bf L_1} \Delta p^{n+1} = -  {\bf D} \rho \widehat{u} - {\bf D} \tau_2 {\bf G} p^{n} + {\bf L_2} p^{n} + b \right ) \; d\textrm{V} \\
+   - \int & {\bf L_1} \Delta p^{n+1} \; d\textrm{V} = - \int {\bf D} \rho \widehat{u} \; d\textrm{V} - \int {\bf D} \tau_2 {\bf G} p^n \; d\textrm{V} + \int {\bf L_2} p^{n} \; d\textrm{V} + \int b \; d\textrm{V} \\
+   - \int & \tau_1 \frac{\partial^2 \Delta p^{n+1}}{\partial x_j^2}  \; d\textrm{V} = - \int \frac{\partial \rho \widehat{u}_j}{\partial x_j}  \; d\textrm{V} - \int  \frac{\partial}{\partial x_j} \left ( \tau_2  \frac{\partial p^n}{\partial x_j} \right ) \; d\textrm{V} + \int \tau_2 \frac{\partial^2 p^{n}}{\partial x_j^2} \; d\textrm{V} + \int b \; d\textrm{V} \\
+   - \int_S & \tau_1 \frac{\partial \Delta p^{n+1}}{\partial x_j}  \; d\textrm{S}_j = - \int_S \rho \widehat{u}_j \; d\textrm{S}_j - \int_S \left ( \tau_2 \frac{\partial p^n}{\partial x_j} \right ) \; d\textrm{S}_j + \int_S \tau_2 \frac{\partial p^{n}}{\partial x_j} \; d\textrm{S}_j + \int b \; d\textrm{V} \\
+   - \int_S & \tau_1 \left ( \sum_{k \in Nodes} \frac{\partial N_k}{\partial x_j} \Delta p^{n+1}_k \right ) \; d\textrm{S}_j = - \int_S \left ( \sum_{k \in Nodes} N_k \rho \widehat{u}_{j,k} \right ) \; d\textrm{S}_j - \int_S \left ( \tau_2 \left ( \sum_{k \in Nodes} N_k \left . \frac{\partial p^n}{\partial x_j} \right |_k \right ) \right ) \; d\textrm{S}_j + \int_S \tau_2 \left ( \sum_{k \in Nodes} \frac{\partial N_k}{\partial x_j} p^{n}_k \right ) \; d\textrm{S}_j + \int b \; d\textrm{V} 
+     
+     
+The last line in Eq. :eq:`eq-continuity-implementation` shows how :math:`{\bf D} \tau_2 {\bf G} p^{n}` and :math:`{\bf L_2} p^{n}` are implemented differently. In the implementation below :math:`{\bf L_2} p^{n}` is `p_dpdx` and :math:`{\bf D} \tau_2 {\bf G} p^{n}` is `p_Gpdx`. The code provides two options to evaluate the :math:`{\bf D} \rho \widehat{u}` using the blending factor `interpTogether` as
 
+.. math::
+   :label: eq-rho-u-interptogether
 
+   (\rho \widehat{u})_{scs} = interpTogether \left ( \sum_{k \in Nodes} N_k \rho_k \widehat{u}_{j,k} \right ) + (1.0 - interpTogether) \left ( \sum_{k \in Nodes} N_k \rho_k \right ) \left ( \sum_{k \in Nodes} N_k \widehat{u}_{j,k} \right )
 
+The implementation of the assembly of the continuity equation described above can be found in `AssembleContinuityElemSolverAlgorithm.C`.
+   
+.. code-block:: c++   
 
+      for ( int ip = 0; ip < numScsIp; ++ip ) {
 
+        // left and right nodes for this ip
+        const int il = lrscv[2*ip];
+        const int ir = lrscv[2*ip+1];
 
+        // corresponding matrix rows
+        int rowL = il*nodesPerElement;
+        int rowR = ir*nodesPerElement;
 
+        // setup for ip values; sneak in geometry for possible reduced sens
+        for ( int j = 0; j < nDim; ++j ) {
+          p_uIp[j] = 0.0;
+          p_rho_uIp[j] = 0.0;
+          p_GpdxIp[j] = 0.0;
+          p_dpdxIp[j] = 0.0;
+        }
+        double rhoIp = 0.0;
 
+        const int offSet = ip*nodesPerElement;
+        for ( int ic = 0; ic < nodesPerElement; ++ic ) {
 
+          const double r = p_shape_function[offSet+ic];
+          const double nodalPressure = p_pressure[ic];
+          const double nodalRho = p_density[ic];
 
+          rhoIp += r*nodalRho;
+
+          double lhsfac = 0.0;
+          const int offSetDnDx = nDim*nodesPerElement*ip + ic*nDim;
+          for ( int j = 0; j < nDim; ++j ) {
+            p_GpdxIp[j] += r*p_Gpdx[nDim*ic+j];
+            p_uIp[j] += r*p_vrtm[nDim*ic+j];
+            p_rho_uIp[j] += r*nodalRho*p_vrtm[nDim*ic+j];
+            p_dpdxIp[j] += p_dndx[offSetDnDx+j]*nodalPressure;
+            lhsfac += -p_dndx_lhs[offSetDnDx+j]*p_scs_areav[ip*nDim+j];
+          }
+
+          // assemble to lhs; left
+          p_lhs[rowL+ic] += lhsfac;
+
+          // assemble to lhs; right
+          p_lhs[rowR+ic] -= lhsfac;
+
+        }
+
+        // assemble mdot
+        double mdot = 0.0;
+        for ( int j = 0; j < nDim; ++j ) {
+          mdot += (interpTogether*p_rho_uIp[j] + om_interpTogether*rhoIp*p_uIp[j] 
+                   - projTimeScale*(p_dpdxIp[j] - p_GpdxIp[j]))*p_scs_areav[ip*nDim+j];
+        }
+
+        // residual; left and right
+        p_rhs[il] -= mdot/projTimeScale;
+        p_rhs[ir] += mdot/projTimeScale;
+      }
 
 
 
