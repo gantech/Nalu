@@ -97,8 +97,8 @@ void HexSCV::determinant(
 //-------- determinant -----------------------------------------------------
 //--------------------------------------------------------------------------
 void HexSCV::determinant(
-  SharedMemView<DoubleType**> coords,
-  SharedMemView<DoubleType*> volume)
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType*>& volume)
 {
   constexpr int subDivisionTable[8][8] = {
       {  0,  8, 12, 11, 19, 20, 26, 25},
@@ -729,10 +729,10 @@ void HexSCS::gij(
 //-------- gij -------------------------------------------------------------
 //--------------------------------------------------------------------------
 void HexSCS::gij(
-    SharedMemView<DoubleType**> coords,
-    SharedMemView<DoubleType***> gupper,
-    SharedMemView<DoubleType***> glower,
-    SharedMemView<DoubleType***> deriv)
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gupper,
+    SharedMemView<DoubleType***>& glower,
+    SharedMemView<DoubleType***>& deriv)
 {
   hex8_derivative(numIntPoints_, &intgLoc_[0], deriv);
   generic_gij_3d<AlgTraitsHex8>(deriv, coords, gupper, glower);

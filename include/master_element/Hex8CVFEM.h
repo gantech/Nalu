@@ -31,8 +31,8 @@ public:
     double * error );
 
   void determinant(
-    SharedMemView<DoubleType**> coords,
-    SharedMemView<DoubleType*> volume);
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType*>& volume);
 
   void grad_op(
     const int nelem,
@@ -41,6 +41,9 @@ public:
     double *deriv,
     double *det_j,
     double * error );
+
+  using MasterElement::shape_fcn;
+  using MasterElement::shifted_shape_fcn;
 
   void shape_fcn(
     double *shpfc);
@@ -101,10 +104,10 @@ public:
     SharedMemView<DoubleType**>&areav);
 
   void gij(
-    SharedMemView<DoubleType**> coords,
-    SharedMemView<DoubleType***> gupper,
-    SharedMemView<DoubleType***> glower,
-    SharedMemView<DoubleType***> deriv);
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gupper,
+    SharedMemView<DoubleType***>& glower,
+    SharedMemView<DoubleType***>& deriv);
 
 
   // non NGP-ready methods second

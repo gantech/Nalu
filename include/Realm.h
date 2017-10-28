@@ -79,6 +79,10 @@ class LagrangeBasis;
 class PromotedElementIO;
 struct ElementDescription;
 
+/** Representation of a computational domain and physics equations solved on
+ * this domain.
+ *
+ */
 class Realm {
  public:
 
@@ -571,7 +575,11 @@ class Realm {
   bool high_order_active() const { return doPromotion_; };
 
   std::string physics_part_name(std::string) const;
+  std::vector<std::string> physics_part_names(std::vector<std::string>) const;
   std::string get_quad_type() const;
+
+  // check for mesh changing
+  bool mesh_changed() const;
 
   stk::mesh::PartVector allPeriodicInteractingParts_;
   stk::mesh::PartVector allNonConformalInteractingParts_;

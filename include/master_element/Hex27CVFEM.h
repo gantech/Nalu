@@ -197,9 +197,12 @@ public:
 
   const int * ipNodeMap(int ordinal = 0);
 
+  using MasterElement::shape_fcn;
+  using MasterElement::shifted_shape_fcn;
+
   void shape_fcn(SharedMemView<DoubleType**> &shpfc) final;
   void shifted_shape_fcn(SharedMemView<DoubleType**> &shpfc) final;
-  void determinant(SharedMemView<DoubleType**> coords, SharedMemView<DoubleType*> volume) final;
+  void determinant(SharedMemView<DoubleType**>& coords, SharedMemView<DoubleType*>& volume) final;
 
   void determinant(
     const int nelem,
@@ -266,10 +269,10 @@ public:
   void determinant(SharedMemView<DoubleType**>&coords,  SharedMemView<DoubleType**>&areav);
 
   void gij(
-    SharedMemView<DoubleType**> coords,
-    SharedMemView<DoubleType***> gupper,
-    SharedMemView<DoubleType***> glower,
-    SharedMemView<DoubleType***> deriv);
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gupper,
+    SharedMemView<DoubleType***>& glower,
+    SharedMemView<DoubleType***>& deriv);
 
   void determinant(
     const int nelem,

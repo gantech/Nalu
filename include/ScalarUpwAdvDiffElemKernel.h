@@ -89,7 +89,6 @@ private:
 
   /// Shape functions
   Kokkos::View<DoubleType[AlgTraits::numScsIp_][AlgTraits::nodesPerElement_]> v_shape_function_ { "view_shape_func" };
-
 };
 
 }  // nalu
