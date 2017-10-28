@@ -199,7 +199,7 @@ ActuatorLinePointDrag::compute_point_drag(
   double coef = 6.0*pi_*pointGasViscosity*pointRadius;
 
   // this is from the fluids perspective, not the psuedo particle
-  pointForceLHS = 2.0*coef*fD;
+  pointForceLHS = coef*fD;
   for ( int j = 0; j < nDim; ++j )
     pointForce[j] = coef*fD*(pointVelocity[j] - pointGasVelocity[j]);
 }
@@ -490,7 +490,7 @@ ActuatorLinePointDrag::execute()
                             nodesPerElement);
 
     // compute volume
-    double elemVolume = compute_volume(nDim, bestElem, bulkData);
+    double bestElemVolume = compute_volume(nDim, bestElem, bulkData);
 
     // interpolate velocity
     interpolate_field(nDim, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
@@ -509,7 +509,7 @@ ActuatorLinePointDrag::execute()
                        ws_pointGasDensity, &ws_pointForce[0], ws_pointForceLHS);
         
     // assemble nodal quantity; radius should be zero, so we can apply fill point drag
-    assemble_source_to_nodes(nDim, bestElem, bulkData, elemVolume, &ws_pointForce[0], ws_pointForceLHS, 
+    assemble_source_to_nodes(nDim, bestElem, bulkData, bestElemVolume, &ws_pointForce[0], ws_pointForceLHS, 
                              *actuator_source, *actuator_source_lhs, 1.0);
 
     // get the vector of elements
@@ -548,7 +548,9 @@ ActuatorLinePointDrag::execute()
   }
 
   // parallel assemble (contributions from ghosted and locally owned)
-  const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
+  std::vector<const stk::mesh::FieldBase*> sumFieldVec;
+  sumFieldVec.push_back(actuator_source);
+  sumFieldVec.push_back(actuator_source_lhs);
   stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldVec);
 
 }
@@ -852,7 +854,7 @@ ActuatorLinePointDrag::complete_search()
       // extract topo and master element for this topo
       const stk::mesh::Bucket &theBucket = bulkData.bucket(elem);
       const stk::topology &elemTopo = theBucket.topology();
-      MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
+      MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
       const int nodesPerElement = meSCS->nodesPerElement_;
 
       // gather elemental coords
@@ -902,7 +904,7 @@ ActuatorLinePointDrag::resize_std_vector(
   const stk::mesh::BulkData & bulkData)
 {
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
+  MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
   const int nodesPerElement = meSCS->nodesPerElement_;
   theVector.resize(nodesPerElement*sizeOfField);
 }
@@ -960,7 +962,7 @@ ActuatorLinePointDrag::compute_volume(
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCV = sierra::nalu::get_volume_master_element(elemTopo);
+  MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(elemTopo);
   const int numScvIp = meSCV->numIntPoints_;
 
   // compute scv for this element
@@ -989,7 +991,7 @@ ActuatorLinePointDrag::interpolate_field(
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
+  MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
   
   // interpolate velocity to this best point
   meSCS->interpolatePoint(
@@ -1053,7 +1055,7 @@ ActuatorLinePointDrag::assemble_source_to_nodes(
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCV = sierra::nalu::get_volume_master_element(elemTopo);
+  MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(elemTopo);
   const int numScvIp = meSCV->numIntPoints_;
 
   // extract elem_node_relations

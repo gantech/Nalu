@@ -193,10 +193,14 @@ struct TrigFieldFunction
   void minimum_distance_to_wall(const double* coords, double* qField) const
   {
     double x = coords[0];
-    double y = coords[1];
-    double z = coords[2];
-
     qField[0] = 10*x+10;
+  }
+
+  void dhdx(const double* /*coords*/, double* qField) const
+  {
+    qField[0] = 30.0;
+    qField[1] = 10.0;
+    qField[2] = -16.0;
   }
 
 private:
@@ -272,6 +276,8 @@ void init_trigonometric_field(
     funcPtr = &TrigFieldFunction::sdr;
   else if (fieldName == "dwdx")
     funcPtr = &TrigFieldFunction::dwdx;
+  else if (fieldName == "dhdx")
+    funcPtr = &TrigFieldFunction::dhdx;
   else if (fieldName == "turbulent_viscosity")
     funcPtr = &TrigFieldFunction::turbulent_viscosity;
   else if (fieldName == "sst_f_one_blending")
@@ -478,6 +484,14 @@ void mixture_fraction_test_function(
     });
 }
 
+void dhdx_test_function(
+  const stk::mesh::BulkData& bulk,
+  const VectorFieldType& coordinates,
+  VectorFieldType& dhdx)
+{
+  init_trigonometric_field(bulk, coordinates, dhdx);
+}
+
 void calc_mass_flow_rate_scs(
   const stk::mesh::BulkData& bulk,
   const stk::topology& topo,
@@ -494,7 +508,7 @@ void calc_mass_flow_rate_scs(
 
   const ScalarFieldType& densityNp1 = density.field_of_state(stk::mesh::StateNP1);
   const VectorFieldType& velocityNp1 = velocity.field_of_state(stk::mesh::StateNP1);
-  auto meSCS = sierra::nalu::get_surface_master_element(topo);
+  auto meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(topo);
 
   dataNeeded.add_cvfem_surface_me(meSCS);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -520,7 +534,7 @@ void calc_mass_flow_rate_scs(
 
       EXPECT_EQ(b.topology(), topo);
 
-      sierra::nalu::ScratchViews preReqData(
+      sierra::nalu::ScratchViews<double> preReqData(
         team, bulk, topo, dataNeeded);
 
       Kokkos::parallel_for(
@@ -576,7 +590,7 @@ void calc_projected_nodal_gradient_interior(
 
   sierra::nalu::ElemDataRequests dataNeeded;
 
-  auto meSCS = sierra::nalu::get_surface_master_element(topo);
+  auto meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(topo);
 
   dataNeeded.add_cvfem_surface_me(meSCS);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -601,7 +615,7 @@ void calc_projected_nodal_gradient_interior(
 
     EXPECT_EQ(b.topology(), topo);
 
-    sierra::nalu::ScratchViews preReqData(
+    sierra::nalu::ScratchViews<double> preReqData(
       team, bulk, topo, dataNeeded);
 
     Kokkos::parallel_for(
@@ -654,7 +668,7 @@ void calc_projected_nodal_gradient_interior(
 
   sierra::nalu::ElemDataRequests dataNeeded;
 
-  auto meSCS = sierra::nalu::get_surface_master_element(topo);
+  auto meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(topo);
 
   dataNeeded.add_cvfem_surface_me(meSCS);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -679,7 +693,7 @@ void calc_projected_nodal_gradient_interior(
 
     EXPECT_EQ(b.topology(), topo);
 
-    sierra::nalu::ScratchViews preReqData(
+    sierra::nalu::ScratchViews<double> preReqData(
       team, bulk, topo, dataNeeded);
 
     Kokkos::parallel_for(
@@ -735,7 +749,7 @@ void calc_projected_nodal_gradient_boundary(
 
   sierra::nalu::ElemDataRequests dataNeeded;
 
-  auto meBC = sierra::nalu::get_surface_master_element(topo);
+  auto meBC = sierra::nalu::MasterElementRepo::get_surface_master_element(topo);
 
   dataNeeded.add_cvfem_surface_me(meBC);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -760,7 +774,7 @@ void calc_projected_nodal_gradient_boundary(
 
     EXPECT_EQ(b.topology(), topo);
 
-    sierra::nalu::ScratchViews preReqData(
+    sierra::nalu::ScratchViews<double> preReqData(
       team, bulk, topo, dataNeeded);
 
     Kokkos::parallel_for(
@@ -808,7 +822,7 @@ void calc_projected_nodal_gradient_boundary(
 
   sierra::nalu::ElemDataRequests dataNeeded;
 
-  auto meBC = sierra::nalu::get_surface_master_element(topo);
+  auto meBC = sierra::nalu::MasterElementRepo::get_surface_master_element(topo);
 
   dataNeeded.add_cvfem_surface_me(meBC);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -833,7 +847,7 @@ void calc_projected_nodal_gradient_boundary(
 
     EXPECT_EQ(b.topology(), topo);
 
-    sierra::nalu::ScratchViews preReqData(
+    sierra::nalu::ScratchViews<double> preReqData(
       team, bulk, topo, dataNeeded);
 
     Kokkos::parallel_for(
@@ -880,7 +894,7 @@ void calc_dual_nodal_volume(
 
   sierra::nalu::ElemDataRequests dataNeeded;
 
-  auto meSCV = sierra::nalu::get_volume_master_element(topo);
+  auto meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(topo);
 
   dataNeeded.add_cvfem_volume_me(meSCV);
   dataNeeded.add_coordinates_field(coordinates, ndim, sierra::nalu::CURRENT_COORDINATES);
@@ -902,7 +916,7 @@ void calc_dual_nodal_volume(
 
     EXPECT_EQ(b.topology(), topo);
 
-    sierra::nalu::ScratchViews preReqData(
+    sierra::nalu::ScratchViews<double> preReqData(
       team, bulk, topo, dataNeeded);
 
     Kokkos::parallel_for(
@@ -974,7 +988,7 @@ void calc_projected_nodal_gradient(
 }
 
 void expect_all_near(
-  const sierra::nalu::SharedMemView<double*>& calcValue,
+  const Kokkos::View<double*>& calcValue,
   const double* exactValue,
   const double tol)
 {
@@ -986,7 +1000,7 @@ void expect_all_near(
 }
 
 void expect_all_near(
-  const sierra::nalu::SharedMemView<double*>& calcValue,
+  const Kokkos::View<double*>& calcValue,
   const double exactValue,
   const double tol)
 {
@@ -998,7 +1012,7 @@ void expect_all_near(
 }
 
 void expect_all_near(
-  const sierra::nalu::SharedMemView<double**>& calcValue,
+  const Kokkos::View<double**>& calcValue,
   const double* exactValue,
   const double tol)
 {
@@ -1011,3 +1025,4 @@ void expect_all_near(
 }
 
 } // unit_test_kernel_utils
+

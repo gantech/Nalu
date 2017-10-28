@@ -79,6 +79,10 @@ class LagrangeBasis;
 class PromotedElementIO;
 struct ElementDescription;
 
+/** Representation of a computational domain and physics equations solved on
+ * this domain.
+ *
+ */
 class Realm {
  public:
 
@@ -552,10 +556,12 @@ class Realm {
   // element promotion options
   bool doPromotion_; // conto
   unsigned promotionOrder_;
-  std::string quadType_;
   
   // id for the input mesh
   size_t inputMeshIdx_;
+
+  // save off the node
+  const YAML::Node & node_;
 
   // tools
   std::unique_ptr<ElementDescription> desc_; // holds topo info
@@ -565,10 +571,15 @@ class Realm {
   void setup_element_promotion(); // create super parts
   void promote_mesh(); // create new super element / sides on parts
   void create_promoted_output_mesh(); // method to create output of linear subelements
-  bool using_SGL_quadrature() const { return quadType_ == "SGL"; };
+  bool using_SGL_quadrature() const { return get_quad_type() == "SGL"; };
   bool high_order_active() const { return doPromotion_; };
 
   std::string physics_part_name(std::string) const;
+  std::vector<std::string> physics_part_names(std::vector<std::string>) const;
+  std::string get_quad_type() const;
+
+  // check for mesh changing
+  bool mesh_changed() const;
 
   stk::mesh::PartVector allPeriodicInteractingParts_;
   stk::mesh::PartVector allNonConformalInteractingParts_;

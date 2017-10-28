@@ -1,18 +1,13 @@
-#	This is the top level CMakeLists.txt file
-#	It should be located within master/nalu
-#	But not in the BUILD folder itself
-#
-###########################################################################################################
-
 cmake_minimum_required (VERSION 2.8.11)
 
-###########################################################################################################
-#
-#  THESE PATHS MAY NEED TO BE CHANGED DEPENDING ON WHERE THEY ARE STORED!!!
-#
-option(NALU_USES_OPENFAST
+option(ENABLE_TESTS "Enable regression testing." OFF)
+option(ENABLE_DOCUMENTATION "Build documentation." OFF)
+option(ENABLE_SPHINX_API_DOCS "Link Doxygen API docs to Sphinx" OFF)
+option(ENABLE_OPENFAST
        "Use OPENFAST tpl to get actuator line positions and forces" OFF)
-
+option(ENABLE_PARAVIEW_CATALYST
+      "Enable ParaView Catalyst. Requires external installation of Trilinos Catalyst IOSS adapter."
+      OFF)
 option(NALU_USES_SMD
        "Use SMD tpl to get actuator line position and force for spring-mass-damper system" OFF)
 
@@ -25,14 +20,14 @@ SET(CMAKE_PREFIX_PATH ${Trilinos_DIR} ${CMAKE_PREFIX_PATH})
 SET(CMAKE_PREFIX_PATH ${Trilinos_PATH} ${CMAKE_PREFIX_PATH})
 find_package(Trilinos REQUIRED)
 
-if (NALU_USES_OPENFAST)
+if (ENABLE_OPENFAST)
    SET(CMAKE_PREFIX_PATH ${OpenFAST_DIR} ${CMAKE_PREFIX_PATH})
    find_package(OpenFAST REQUIRED)
    MESSAGE("   OPENFAST Include dir =  ${OpenFAST_INCLUDE_DIRS}")
    MESSAGE("   OPENFAST Libraries =  ${OpenFAST_LIBRARIES}")
    include_directories(${OpenFAST_INCLUDE_DIRS})
    add_definitions("-DNALU_USES_OPENFAST")
-endif (NALU_USES_OPENFAST)
+endif (ENABLE_OPENFAST)
 
 if (NALU_USES_SMD)
    SET(CMAKE_PREFIX_PATH ${SMD_DIR} ${CMAKE_PREFIX_PATH})
@@ -50,10 +45,10 @@ include_directories(${YAML_INCLUDES}/..)
 
 #include(FindPackageHandleStandardArgs)
 
+##########################  TRILINOS  ######################################
+
 include_directories(${Trilinos_INCLUDE_DIRS})
 include_directories(${Trilinos_TPL_INCLUDE_DIRS})
-
-#######################################     TRILINOS	 ##################################################
 
 MESSAGE("\nFound Trilinos!  Here are the details: ")
 # Uncomment lines to view more details about Trilinos
@@ -97,7 +92,7 @@ ELSE(Trilinos_BUILD_SHARED_LIBS)
   SET(Nalu_LIBRARY_TYPE STATIC)
 ENDIF(Trilinos_BUILD_SHARED_LIBS)
 
-#######################################     NALU     ##########################
+##########################  NALU  ######################################
 
 PROJECT(Nalu)
 
@@ -121,9 +116,9 @@ include_directories (${CMAKE_SOURCE_DIR}/include)
 add_library (nalu ${SOURCE} ${HEADER})
 target_link_libraries(nalu ${Trilinos_LIBRARIES})
 target_link_libraries(nalu ${YAML_LIBRARY})
-if (NALU_USES_OPENFAST)
+if (ENABLE_OPENFAST)
    target_link_libraries(nalu ${OpenFAST_LIBRARIES} ${OpenFAST_CPP_LIBRARIES})
-endif (NALU_USES_OPENFAST)
+endif (ENABLE_OPENFAST)
 
 if (NALU_USES_SMD)
    target_link_libraries(nalu ${SMD_LIBRARIES})
@@ -151,21 +146,32 @@ add_executable(${utest_ex_name} unit_tests.C ${UNIT_TESTS_SOURCES})
 target_link_libraries(${utest_ex_name} nalu)
 target_include_directories(${utest_ex_name} PUBLIC "${CMAKE_SOURCE_DIR}/unit_tests")
 
+set(nalu_ex_catalyst_name "naluXCatalyst")
+if(ENABLE_PARAVIEW_CATALYST)
+   set(PARAVIEW_CATALYST_INSTALL_PATH
+       ""
+       CACHE
+       PATH
+       "Path to external installation of Trilinos Catalyst IOSS plugin.")
+   configure_file(cmake/naluXCatalyst.in ${nalu_ex_catalyst_name} @ONLY)
+endif()
+
 IF (INSTALL_NALU)
   install(TARGETS ${utest_ex_name} ${nalu_ex_name} nalu
           RUNTIME DESTINATION bin
           ARCHIVE DESTINATION lib
           LIBRARY DESTINATION lib)
   install(DIRECTORY include/ DESTINATION include)
+  if(ENABLE_PARAVIEW_CATALYST)
+    install(PROGRAMS ${CMAKE_BINARY_DIR}/naluXCatalyst DESTINATION bin)
+  endif()
   include(CMakePackageConfigHelpers)
 ENDIF ()
 
-option(BUILD_DOCUMENTATION "Build documentation." OFF)
-if(BUILD_DOCUMENTATION)
+if(ENABLE_DOCUMENTATION)
    add_subdirectory(docs)
 endif()
 
-option(ENABLE_TESTS "Enable regression testing." OFF)
 if(ENABLE_TESTS)
    ENABLE_TESTING()
    INCLUDE(CTest)

@@ -125,7 +125,7 @@ HeatCondEquationSystem::HeatCondEquationSystem(
   // extract solver name and solver object
   std::string solverName = realm_.equationSystems_.get_solver_block_name("temperature");
   LinearSolver *solver = realm_.root()->linearSolvers_->create_solver(solverName, EQ_TEMPERATURE);
-  linsys_ = LinearSystem::create(realm_, 1, "HeatCondEQS", solver);
+  linsys_ = LinearSystem::create(realm_, 1, this, solver);
 
   // determine nodal gradient form
   set_nodal_gradient("temperature");
@@ -368,7 +368,7 @@ HeatCondEquationSystem::register_interior_algorithm(
     bool solverAlgWasBuilt =  false;
     std::tie(solverAlg, solverAlgWasBuilt) = build_or_add_part_to_solver_alg(*this, *part, solverAlgMap);
 
-    ElemDataRequests& dataPreReqs = solverAlg->dataNeededBySuppAlgs_;
+    ElemDataRequests& dataPreReqs = solverAlg->dataNeededByKernels_;
     auto& activeKernels = solverAlg->activeKernels_;
 
     if (solverAlgWasBuilt) {
@@ -383,7 +383,7 @@ HeatCondEquationSystem::register_interior_algorithm(
         temperature_, thermalCond_, dataPreReqs
       );
 
-      build_topo_kernel_if_requested<ScalarDiffFemKernel>(
+      build_fem_kernel_if_requested<ScalarDiffFemKernel>(
         partTopo, *this, activeKernels, "FEM_DIFF",
         realm_.bulk_data(), *realm_.solutionOptions_, temperature_, thermalCond_, dataPreReqs
       );
@@ -908,7 +908,7 @@ HeatCondEquationSystem::reinitialize_linear_system()
   // create new solver
   std::string solverName = realm_.equationSystems_.get_solver_block_name("temperature");
   LinearSolver *solver = realm_.root()->linearSolvers_->create_solver(solverName, EQ_TEMPERATURE);
-  linsys_ = LinearSystem::create(realm_, 1, "HeatCondEQS", solver);
+  linsys_ = LinearSystem::create(realm_, 1, this, solver);
 
   // initialize
   solverAlgDriver_->initialize_connectivity();
@@ -939,7 +939,7 @@ HeatCondEquationSystem::solve_and_update()
   for ( int k = 0; k < maxIterations_; ++k ) {
 
     NaluEnv::self().naluOutputP0() << " " << k+1 << "/" << maxIterations_
-                    << std::setw(15) << std::right << name_ << std::endl;
+                    << std::setw(15) << std::right << userSuppliedName_ << std::endl;
     
     // heat conduction assemble, load_complete and solve
     assemble_and_solve(tTmp_);

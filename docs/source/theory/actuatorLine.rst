@@ -24,13 +24,12 @@ Favre-filtered momentum equation
 .. math::
    :label: fav-mom-bodyforce
 
-     \int {{\partial \bar{\rho} \tilde{u}_i} \over {\partial t}} {\rm d}V
-     +  \int \bar{\rho} \tilde{u}_i \tilde{u}_j n_j {\rm d}S 
-     +  \int \bar{P} n_i {\rm d}S  =
-     \int \bar{\tau}_{ij} n_j {\rm d}S 
-     &+ \int \tau_{u_i u_j} n_j {\rm d}S  
-     + \int \left(\bar{\rho} - \rho_{\circ} \right) g_i {\rm d}V \nonumber \\
-     &+ \int f_i {\rm d}V,
+     \int \frac{\partial \bar{\rho} \tilde{u}_i} {\partial t} {\rm d}V
+     + \int \bar{\rho} \tilde{u}_i \tilde{u}_j n_j {\rm d}S 
+     + \int \bar{P} n_i {\rm d}S = \int \bar{\tau}_{ij} n_j {\rm d}S 
+     + \int \tau_{u_i u_j} n_j {\rm d}S  
+     + \int \left(\bar{\rho} - \rho_{\circ} \right) g_i {\rm d}V \\
+     + \int f_i {\rm d}V,
 
 The body-force term :math:`f_i` is volumetric and is a force per unit
 volume. The actuator forces, :math:`F'_i`, are not volumetric. They
@@ -38,7 +37,7 @@ exist along lines or on surfaces and are force per unit length or area.
 Therefore, a projection function, :math:`g`, is used to project the
 actuator forces into the fluid volume as volumetric forces. A simple and
 commonly used projection function is a uniform Gaussian as proposed by
-Sørensen and Shen :cite:`Sorensen:2002`,
+S{\o}rensen and Shen :cite:`Sorensen:2002`,
 
 .. math:: g(\vec{r}) = \frac{1}{\pi^{3/2} \epsilon^3} e^{-\left( \left| \vec{r} \right|/\epsilon \right)^2},
 
@@ -83,7 +82,7 @@ projection function width :math:`\epsilon` does not exceed a certain threshold.
 Design
 ======
 
-The initial actuator capability implemented in Nalu is focused on the actuator line algorithm. However, the class hierarchy is designed with placeholders for actuator disk and swept actuator line capability and potentially an actuator surface capability. The general set of functions required to handle actuators are the same whether it is a line, disk, swept line, or surface. The various classes implementing the different actuator capabilities inherit from an overall actuator class. The ``ActuatorLineFAST`` class couples Nalu with the third party library OpenFAST for actuator line simulations of wind turbines. OpenFAST (https://nwtc.nrel.gov/FAST), available from https://github.com/OpenFAST/openfast, is a aero-hydro-servo-elastic tool to model wind turbine developed by the National Renewable Energy Laboratory (NREL). The ``ActuatorLineFAST`` class will help Nalu effectively act as an inflow module to OpenFAST by supplying the velocity field information.
+The initial actuator capability implemented in Nalu is focused on the actuator line algorithm. However, the class hierarchy is designed with the potential to add other actuator source terms such as actuator disk, swept actuator line and actuator surface capability in the future. The ``ActuatorLineFAST`` class couples Nalu with the third party library OpenFAST for actuator line simulations of wind turbines. OpenFAST (https://nwtc.nrel.gov/FAST), available from https://github.com/OpenFAST/openfast, is a aero-hydro-servo-elastic tool to model wind turbine developed by the National Renewable Energy Laboratory (NREL). The ``ActuatorLineFAST`` class will help Nalu effectively act as an inflow module to OpenFAST by supplying the velocity field information.
 
 We have tested  actuator line implementation to be reasonably scalable. Actuators require searches and parallel communication of blade element velocities and forces, so our implementation should be scalable. Scalability is affected by the number of actuator turbines, the actuator element  density, and the resolution of the mesh surrounding the actuators (i.e., the number of mesh elements that will receive body force). Further testing on scalability is underway with the demonstration of this capability to simulate the OWEZ wind farm.
 
@@ -138,8 +137,8 @@ Implementation
 Restart capability
 ==================
 
-While Nalu itself supports a full restart capability, OpenFAST may not support a full restart capability for specific use cases. To account for this, the OpenFAST - C++ API supports two kinds of restart capabilities. To restart a Nalu - OpenFAST coupled simulation one must set `t_start` in the line commands to a positive non-zero value and set `simStart` to either `trueRestart` or `restartDriverInitFAST`. Use `trueRestart` when OpenFAST supports a full restart capability for the specific use case. `restartDriverInitFAST` will start OpenFAST from `t=0` again for all turbines and run upto the restart time and then run the coupled Nalu + OpenFAST simulation normally. During the Nalu - OpenFAST he sampled velocity data at the actuator nodes is stored in a `hdf5` file at every OpenFAST time step and then read back in when using the `restart 
-   
+While Nalu itself supports a full restart capability, OpenFAST may not support a full restart capability for specific use cases. To account for this, the OpenFAST - C++ API supports two kinds of restart capabilities. To restart a Nalu - OpenFAST coupled simulation one must set `t_start` in the line commands to a positive non-zero value and set `simStart` to either `trueRestart` or `restartDriverInitFAST`. Use `trueRestart` when OpenFAST supports a full restart capability for the specific use case. `restartDriverInitFAST` will start OpenFAST from `t=0` again for all turbines and run upto the restart time and then run the coupled Nalu + OpenFAST simulation normally. During the Nalu - OpenFAST he sampled velocity data at the actuator nodes is stored in a `hdf5` file at every OpenFAST time step and then read back in when using the `restart`. 
+ 
 
 The command line options for the actuator line with coupling to OpenFAST looks as follows for two turbines:
 

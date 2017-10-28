@@ -26,10 +26,18 @@ class AssembleNodalGradAlgorithmDriver;
 class AssembleNodalGradUAlgorithmDriver;
 class MomentumEquationSystem;
 class ContinuityEquationSystem;
+class ComputeMdotAlgorithmDriver;
 class LinearSystem;
 class ProjectedNodalGradientEquationSystem;
 class SurfaceForceAndMomentAlgorithmDriver;
 
+/** Low-Mach formulation of the Navier-Stokes Equations
+ *
+ *  This class is a thin-wrapper around sierra::nalu::ContinuityEquationSystem
+ *  and sierra::nalu::MomentumEquationSystem that orchestrates the interactions
+ *  between the velocity and the pressure Possion solves in the
+ *  LowMachEquationSystem::solve_and_update method.
+ */
 class LowMachEquationSystem : public EquationSystem {
 
 public:
@@ -93,6 +101,9 @@ public:
      
 };
 
+/** Representation of the Momentum conservation equations in 2-D and 3-D
+ *
+ */
 class MomentumEquationSystem : public EquationSystem {
 
 public:
@@ -249,7 +260,7 @@ public:
   ScalarFieldType *pTmp_;
 
   AssembleNodalGradAlgorithmDriver *assembleNodalGradAlgDriver_;
-  AlgorithmDriver *computeMdotAlgDriver_;
+  ComputeMdotAlgorithmDriver *computeMdotAlgDriver_;
   ProjectedNodalGradientEquationSystem *projectedNodalGradEqs_;
 };
 

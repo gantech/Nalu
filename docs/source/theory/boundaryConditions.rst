@@ -56,8 +56,8 @@ fully-developed turbulent flow near a no-slip wall, can be written as,
 .. math::
    :label: law-wall
 
-   u^+ = {u_{\|} \over u_{\tau}} 
-       = { 1 \over \kappa } \ln \left(Ey^+\right) ,
+   u^+ = \frac{u_{\|}}{u_{\tau}} 
+       = \frac{1}{\kappa} \ln \left(Ey^+\right) ,
 
 
 where :math:`u^+` is defined by the the near-wall parallel velocity,
@@ -83,8 +83,8 @@ wall, :math:`y^+`, is defined as the following:
 .. math::
    :label: yplus
 
-   y^+ = {{ \rho Y_p} \over {\mu }}\left(\tau_w \over \rho \right)^{1/2} 
-               = {{ \rho Y_p u_{\tau}} \over {\mu }}.
+   y^+ = \frac{ \rho Y_p}{\mu }\left(\frac{\tau_w}{\rho} \right)^{1/2} 
+       = \frac{ \rho Y_p u_{\tau}} {\mu }.
 
 The classical law of the wall is as follows:
 
@@ -123,7 +123,8 @@ dimensionless wall roughness parameter and is described by,
 
 
 In Nalu, :math:`\kappa` is set to the value of 0.42 while the value of
-:math:`E` is set to 9.8 for smooth walls (White suggests values of :math:`\kappa=0.41` and :math:`E=7.768.`). The viscous sublayer is
+:math:`E` is set to 9.8 for smooth walls (White suggests values of
+:math:`\kappa=0.41` and :math:`E=7.768.`). The viscous sublayer is
 assumed to extend to a value of :math:`y^+` = 11.63.
 
 The wall shear stress, :math:`\tau_w`, can be expressed as,
@@ -131,9 +132,9 @@ The wall shear stress, :math:`\tau_w`, can be expressed as,
 .. math::
    :label: wall-shear-trb
 
-   \tau_w = \rho u_\tau^2 = \rho u_\tau {{u_\|} \over {u^+}}
-                  = { {\rho \kappa u_{\tau}}  \over {\ln \left(Ey^+\right) } }u_\|
-                  = \lambda_w u_\| ,
+   \tau_w = \rho u_\tau^2 = \rho u_\tau {\frac{u_\|} {u^+}}
+          = \frac{\rho \kappa u_{\tau}}{\ln \left(Ey^+\right) } u_\|
+          = \lambda_w u_\| ,
 
 
 where :math:`\lambda_w` is simply the grouping of the factors from the
@@ -143,7 +144,7 @@ shear stress is given by,
 .. math::
    :label: wall-shear-lam
 
-   \tau_w =  \mu {u_\| \over Y_p} .
+   \tau_w =  \mu \frac{u_\|}{Y_p} .
 
 
 The force imparted by the wall, for the :math:`i_{th}` component of
@@ -376,7 +377,8 @@ where
 .. math::
    :label: psi_m
 
-   \psi_m\left(\frac{z}{L}\right) = 2\ln\frac{1 + x}{2} + \ln\frac{1 + x^2}{2} - 2\tan^{-1}x +
+   \psi_m\left(\frac{z}{L}\right) = 2\ln\frac{1 + x}{2}
+   + \ln\frac{1 + x^2}{2} - 2\tan^{-1}x +
    \frac{\pi}{2}, \quad x = \left(1 - \beta_m\frac{z}{L}\right)^{1/4},
 
 .. math::
@@ -393,6 +395,7 @@ The constants used in (:eq:`vel_stable`) -- (:eq:`psi_h`) are :cite:`Dyer:74`
    \kappa = 0.41,~~\alpha_h =
    1,~~\beta_m=16,~~\beta_h=16,~~\gamma_m=5.0,~~\gamma_h=5.0.
 
+.. _theory_abl_wall_function:
 
 ABL Wall Function
 ~~~~~~~~~~~~~~~~~
@@ -408,29 +411,140 @@ to be one fourth of the length of the nearest edge intersecting the
 boundary face.  The boundary condition is specified weakly through the
 imposition of a surface shear stress and surface heat flux.
 
-The procedure for applying the boundary condition is as follows.
+The procedure for applying the boundary condition is as follows:
 
-1. Determine the stratification state of the boundary layer by
-calculating the sign of the Monin-Obukhov length scale.
+1. Determine the stratification state of the boundary layer by calculating the sign of the Monin-Obukhov length scale.
+2. Solve the appropriate profile equation, either (:eq:`vel_neutral`), (:eq:`vel_stable`), or (:eq:`vel_unstable`), for the friction velocity :math:`u_\tau`.  For the neutral case, :math:`u_\tau` can be solved for directly.  For the stable and unstable cases, :math:`u_\tau` must be solved for iteratively because :math:`L` appears in these equations and :math:`L` depends on :math:`u_\tau`.
+3. The surface shear stress is calculated as :math:`\tau_s = \rho_s u_\tau^2`.  For calculating left-hand-side Jacobian entries, the form :eq:`tau_s_useful` is used, where :math:`\psi^\prime` is zero for a neutral profile, :math:`-\gamma_m z/L` for a stable profile, and :math:`\psi_h(z/L)` for an unstable profile. The Jacobian entries follow directly from this form.
+4. The user specified surface heat flux is applied to the enthalpy equation. Evaluation of surface temperature is not required for the boundary condition specification. However, if surface temperature is required for evaluation of other quantities within the code, the appropriate surface layer temperature profile should be used, either (:eq:`temp_stable`) or (:eq:`temp_unstable`).
 
-2. Solve the appropriate profile equation, either
-(:eq:`vel_neutral`), (:eq`vel_stable`), or (:eq:`vel_unstable`),
-for the friction velocity :math:`u_\tau`.  For the neutral case, :math:`u*` can be
-solved for directly.  For the stable and unstable cases, :math:`u*` must
-be solved for iteratively because :math:`L` appears in these equations and
-:math:`L` depends on :math:`u_\tau`.
+.. math::
+   :label: tau_s_useful
 
-3. The surface shear stress is calculated as :math:`\tau_s = \rho_s u_\tau^2`.
-For calculating left-hand-side Jacobian entries, the form :math:`\tau_s =
-\lambda_s u_{||}` is useful. This form can be found by algebraic
-manipulation of the relevant velocity profile equation.
+   \tau_{s_i} = \lambda_s u_{||_i} = \frac{\kappa\rho u_\tau}{\log(z/z_0) - \psi^\prime (z/L)},
 
-4. The user specified surface heat flux is applied to the enthalpy
-equation.  Evaluation of surface temperature is not required for
-the boundary condition specification.  However, if surface
-temperature is required for evaluation of other quantities within
-the code, the appropriate surface layer temperature profile should
-be used, either (:eq:`temp_stable`) or (:eq:`temp_unstable`).
+Moeng Wall Function
++++++++++++++++++++
+
+The Monin-Obukhov expressions only truly hold in a mean sense, and are not
+necessarily valid when used to specify an instantaneous value for the
+surface shear stress in a large eddy simulation. Moeng :cite:`Moeng:84`
+developed a local surface stress condition that utilizes
+horizontally-averaged quantities, for which the M-O relationships are
+assumed to hold.  This boundary condition is derived by first assuming
+that the local tangential shear stress vector can be written using a
+drag law:
+
+.. math::
+   :label: draglaw
+
+   \mathbf{\tau}_s  = C_D u_{{||}_p} \mathbf{u}_{{||}_p}
+
+Here, :math:`C_D` is the drag coefficient, :math:`\mathbf{u}_{{||}_p}` is the
+surface-tangential velocity vector evaluated at the near-surface
+discretization point, and :math:`u_{{||}_p}` denotes the magnitude of this
+velocity vector.
+
+An expression for :math:`\tau_s` is derived in the Appendix of Moeng :cite:`Moeng:84`, by
+writing the velocity as the sum of a horizontally averaged mean
+component and a fluctuation about this mean:
+
+.. math::
+
+   \mathbf{u}_{{||}_p} = \left< \mathbf{u}_{{||}_p} \right> +
+   \mathbf{u}_{{||}_p}^{\prime\prime}
+
+There are two main assumptions in the derivation.  The first is that
+the instantaneous version of the drag law(:eq:`draglaw`) is
+identical to the horizontally-averaged version.  The second assumption
+is [#f1]_
+
+.. math::
+
+   u_{{||}_p}^{\prime\prime} \mathbf{u}_{{||}_p}^{\prime\prime} \approx
+   \left< u_{{||}_p}^{\prime\prime} \mathbf{u}_{{||}_p}^{\prime\prime}
+   \right>
+
+After algebraic manipulations, the resulting vector expression is
+
+.. math::
+   :label: moeng_bc
+
+   \mathbf{\tau}_s = \left< \mathbf{\tau}_s \right> \left( \frac{u_{{||}_p}
+   \left< \mathbf{u}_{{||}_p} \right> +  \left< u_{{||}_p} \right>
+   \left[ \mathbf{u}_{{||}_p} - \left< \mathbf{u}_{{||}_p} \right>
+   \right]}{\left<  u_{{||}_p} \right> \left< \mathbf{u}_{{||}_p}
+   \right>}\right)
+
+The procedure to calculate the surface stress at a boundary
+integration point is as follows.
+
+1. Calculate the horizontally-averaged quantities :math:`\left<u_{{||}_p}\right>$ and $\left<\mathbf{u}_{{||}_p}\right>`.
+2. Use the M-O velocity profile relationships :cite:`Dyer:74` to calculate an average friction velocity :math:`u_\tau`.
+3. Use the relationship (:eq:`tau_s_useful`) to calculate the components of :math:`\left< \mathbf{\tau}_s \right>`.
+4. Calculate the local surface shear stress using(:eq:`moeng_bc`).
+
+Jacobian entries are required to populate the left-hand side matrix
+for the terms resulting from (:eq:`moeng_bc`).  For convenience, we
+write the vector quantities as tensors with subscripts denoting the
+vector component indices.  We need an expression for the sensitivity
+of the shear stress, applied at the boundary face integration point,
+to the velocity components at the :math:`l^{th}` grid node, or
+:math:`\frac{\partial \tau_{s_i}^{(ip)}}{\partial u_j^(l)}`.
+
+Differentiating (:eq:`moeng_bc`) with respect to :math:`u_{j}^{(l)}` gives
+
+.. math::
+   :label: sens1
+
+   \frac{\partial \tau_{s_i}^{(ip)}}{\partial u_{j}^{(l)}} =
+   \frac{\left<\tau_s^{(ip)}\right>_i}{\left<u_{||}^{(ip)}\right>}
+   \frac{\partial u_{||}^{(ip)}}{\partial u_{j}^{(l)}} +
+   \frac{\left<\tau_s^{(ip)}\right>_i}{\left<{u_{||}}_i^{(ip)}\right>}
+   \frac{\partial {u_{||}}_i^{(ip)}}{\partial u_{j}^{(l)}}
+
+The first term involves a partial derivative of the tangential
+velocity magnitude, while the second term involves the partial
+derivative of the tangential velocity component.  Applying the chain
+rule to the first term gives
+
+.. math::
+   :label: sens2
+
+   \frac{\partial u_{||}^{(ip)}}{\partial u_{j}^{(l)}} = \frac{1}{u_{||}^{(ip)}}
+   {u_{||}}_k^{(ip)} \frac{\partial {u_{||}}_k^{(ip)}}{\partial u_{j}^{(l)}},
+
+where summation is implied over the repeated index :math:`k`.  The second
+partial derivative in (:eq:`sens1`) is seen to appear also in
+(:eq:`sens2`).  It remains to write an expression for this
+derivative, which is done by first writing the tangential velocity
+vector at the boundary face integration point in terms of the
+Cartesian velocity components:
+
+
+.. math::
+   :label: utan
+
+   {u_{||}}_i^{(ip)} = (1 - n_i n_j)\delta_{ij} u_i^{(ip)} - n_i n_j (1 -
+   \delta_{ij}) u_j^{(ip)}
+
+with summation over the :math:`j` index.  The integration point velocity
+components are calculated from the face nodes using
+
+.. math::
+   :label: ipvel
+
+   u_i^{(ip)} = \sum_{l=1}^{N_n} \phi^{(l)}(x_{ip})u_i^{(l)}
+
+Substituting (:eq:`ipvel`) into (:eq:`utan`), followed by (:eq:`utan`)
+into (:eq:`sens2`) gives
+
+.. math::
+
+   \frac{\partial u_{||}^{(ip)}}{\partial u_{j}^{(l)}} = \frac{1}{u_{||}^{(ip)}}
+   {u_{||}}_k^{(ip)} \sum_{j=1}^3 \sum_{l=1}^{N_n} (1 - n_i n_j)
+   \delta_{ij} \phi^{(l)}(x_{ip}) - n_i n_j (1 -
+   \delta_{ij})\phi^{(l)}(x_{ip})
 
 
 Turbulent Kinetic Energy, :math:`k_{sgs}` LES model
@@ -448,7 +562,7 @@ of the wall formulation and can be expressed as,
 .. math::
    :label: wall-pk-1
 
-   {P_k}_w = \tau_w {{\partial u_{\|}} \over {\partial y}}.
+   {P_k}_w = \tau_w \frac{\partial u_{\|}}{\partial y}.
 
 
 The parallel velocity, :math:`u_{\|}`, can be related to the wall shear
@@ -457,7 +571,7 @@ stress by,
 .. math::
    :label: tauwall-uplus
 
-   \tau_w {u^+ \over y^+ } = \mu {u_{\|} \over Y_p }.
+   \tau_w \frac{u^+}{y^+} = \mu \frac{u_{\|}}{Y_p}.
 
 
 Taking the derivative of both sides of Equation :eq:`tauwall-uplus`, and
@@ -466,7 +580,7 @@ substituting this relationship into Equation :eq:`wall-pk-1` yields,
 .. math::
    :label: wall-pk-2
 
-   {P_k}_w = {\tau_w^2 \over \mu} {{\partial u^+} \over {\partial y^+}}.
+   {P_k}_w = \frac{\tau_w^2} {\mu} \frac{\partial u^+}{\partial y^+}.
 
 
 Applying the derivative of the law of the wall formulation,
@@ -476,10 +590,10 @@ Equation :eq:`law-wall`, provides the functional form of
 .. math::
    :label: dlaw-wall
 
-   {\partial u^+ \over \partial y^+}
-         = {\partial \over \partial y^+}
-          \left[{ 1 \over \kappa } \ln \left(Ey^+\right) \right]
-         = {1 \over \kappa y^+}.
+   \frac{\partial u^+}{\partial y^+}
+         = \frac{\partial} {\partial y^+}
+          \left[\frac{1}{\kappa} \ln \left(Ey^+\right) \right]
+         = \frac{1}{\kappa y^+}.
 
 
 Substituting Equation :eq:`law-wall` within Equation :eq:`wall-pk-2` yields
@@ -488,7 +602,7 @@ a commonly used form of the near wall production term,
 .. math::
    :label: wall-pk-3
 
-   {P_k}_w = {{\tau_w}^2 \over \rho\kappa u_{\tau} Y_p}.
+   {P_k}_w = \frac{{\tau_w}^2}{\rho\kappa u_{\tau} Y_p}.
 
 
 Assuming local equilibrium, :math:`P_k = \rho\epsilon`, and using
@@ -508,7 +622,7 @@ given by,
 .. math::
    :label: wall-tke
 
-   k = {{u_\tau^2} \over {C_\mu^{1/2}}}.
+   k = \frac{u_\tau^2}{C_\mu^{1/2}}.
 
 
 This expression for turbulent kinetic energy is evaluated at the
@@ -527,7 +641,7 @@ grid spacing. The boundary condition is given by,
 
 .. math::
 
-   \omega = {6 \nu \over \beta_1 y^{2}},
+   \omega = \frac{6 \nu} {\beta_1 y^{2}},
 
 which is valid for :math:`y^{+} < 3`.
 
@@ -541,13 +655,13 @@ a slight modification in constant syntax,
 .. math::
    :label: wallModelTke
 
-   k = {u_{\tau}^{2} \over \sqrt{\beta^*}}.
+   k = \frac{u_{\tau}^{2}}{\sqrt{\beta^*}}.
 
 
 In the case of :math:`\omega`, an analytic expression is known in the
 log layer:
 
-.. math:: \omega = {u_{\tau} \over \sqrt{\beta^*} \kappa y},
+.. math:: \omega = \frac{u_{\tau}} {\sqrt{\beta^*} \kappa y},
 
 which is independent of :math:`k`. Because all these expressions
 require :math:`y` to be in the log layer, they should absolutely not be
@@ -578,9 +692,9 @@ The boundary condition for each intensity assumes a grey, diffuse
 surface as,
 
 .. math::
-   :label: intBc1
+   :label: intBc
 
-   I\left(s\right) = {1 \over \pi} \left[ \tau \sigma T_\infty^4 
+   I\left(s\right) = \frac{1}{\pi} \left[ \tau \sigma T_\infty^4 
                      + \epsilon \sigma T_w^4
                      + \left(1 - \epsilon - \tau \right) K \right].
 
@@ -773,23 +887,25 @@ with the nonconformal mass flow rate given by,
 .. math::
    :label: mdotA2
 
-    \dot {m}^A = [\frac{(\rho u_j^A + \gamma(\tau G_j^A p -\tau \frac{\partial p^A}{\partial x_j}))n_j^A
-     - (\rho u_j^B + \gamma(\tau G_j^B p -\tau \frac{\partial p^B}{\partial x_j}))n_j^B}{2}
-     + \lambda^A ( p^A - p^B)] dS^A.
+    \dot {m}^A = [\frac{(\rho u_j^A + \gamma(\tau G_j^A p
+    -\tau \frac{\partial p^A}{\partial x_j}))n_j^A
+    - (\rho u_j^B + \gamma(\tau G_j^B p -\tau \frac{\partial p^B}{\partial x_j}))n_j^B}{2}
+    + \lambda^A ( p^A - p^B)] dS^A.
 
 In the above set of expressions, the consistent definition of :math:`\hat{u}_j`, i.e., the convecting velocity including
 possible pressure stabilization terms, is retained.
 
 As with the interior advection scheme, the mass flow rate involves pressure stabilization terms. The value of 
 :math:`\gamma` defines whether or not the full pressure stabilization terms are included in the mass flow rate expression.
-Equation :eq:`mdotA` also forms the continuity nonconformal boundary contribution. 
+Equation :eq:`mdotA2` also forms the continuity nonconformal boundary contribution. 
 
 With the substitution of :math:`\eta` to be unity, the effective convective term is as follows:
 
 .. math::
    :label: advectionAUPW
 
-    \int \rho \hat{u}_j \phi n_j^A dS^A = \frac{ (\dot m^A + |\dot m^A|) \phi^A +  (\dot m^A - |\dot m^A|)\phi^B}{2}.
+    \int \rho \hat{u}_j \phi n_j^A dS^A =
+    \frac{ (\dot m^A + |\dot m^A|) \phi^A +  (\dot m^A - |\dot m^A|)\phi^B}{2}.
 
 Note that this form reduces to a standard upwind operator.
 
@@ -911,3 +1027,8 @@ Figure :numref:`dg-quad4-quad9` and Figure :numref:`dg-hex8-tet4`).
    
    Discontinuous Galerkin non-conformal interface mixed topology (hex8/tet4).
 
+
+.. rubric:: Footnotes
+
+.. [#f1] Or, at least, that the difference between these quantities
+  is small relative to other terms, see Moeng :cite:`Moeng:84`.

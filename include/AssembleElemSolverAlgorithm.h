@@ -29,26 +29,26 @@ class MasterElement;
 class AssembleElemSolverAlgorithm : public SolverAlgorithm
 {
 public:
-
   AssembleElemSolverAlgorithm(
     Realm &realm,
     stk::mesh::Part *part,
     EquationSystem *eqSystem,
-    const stk::topology &theTopo);
+    const stk::topology &theTopo,
+    bool interleaveMeViews = true);
   virtual ~AssembleElemSolverAlgorithm() {}
   virtual void initialize_connectivity();
   virtual void execute();
 
-  // topo and master element for this instance
+  // topo for this instance
   stk::topology topo_;
-  MasterElement *meSCS_;
-  MasterElement *meSCV_;
 
-  ElemDataRequests dataNeededBySuppAlgs_;
+  ElemDataRequests dataNeededByKernels_;
   int rhsSize_;
+  const bool interleaveMEViews_;
 };
 
 } // namespace nalu
 } // namespace Sierra
 
 #endif
+

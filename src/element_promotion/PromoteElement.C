@@ -8,7 +8,9 @@
 #include <element_promotion/PromoteElement.h>
 #include <element_promotion/PromotedPartHelper.h>
 #include <element_promotion/ElementDescription.h>
+#include <master_element/Hex8CVFEM.h>
 #include <master_element/MasterElement.h>
+#include <master_element/Quad42DCVFEM.h>  
 #include <NaluEnv.h>
 #include <BucketLoop.h>
 
@@ -660,7 +662,7 @@ set_coordinates_quad(
   const stk::mesh::PartVector& promotedPartVector,
   const VectorFieldType& coordField)
 {
-  Quad2DSCS meQuad;
+  Quad42DSCS meQuad;
   auto selector = stk::mesh::selectUnion(promotedPartVector);
   const auto& elem_buckets = bulk.get_buckets(stk::topology::ELEM_RANK, selector);
 
