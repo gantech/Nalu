@@ -23,7 +23,7 @@ public:
 
   virtual ~CoriolisSrc() {}
 
-  void cross_product(std::vector<double> u, std::vector<double> v, std::vector<double> cross);
+  void cross_product(std::vector<double> u, std::vector<double> v, std::vector<double>& cross);
 
   int nDim_;
   double earthAngularVelocity_;

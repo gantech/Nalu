@@ -71,7 +71,7 @@ CoriolisSrc::CoriolisSrc(Realm &realm) {
 //--------------------------------------------------------------------------
 void
 CoriolisSrc::cross_product(
-  std::vector<double> u, std::vector<double> v, std::vector<double> cross)
+  std::vector<double> u, std::vector<double> v, std::vector<double>& cross)
 {
   cross[0] =   u[1]*v[2] - u[2]*v[1];
   cross[1] = -(u[0]*v[2] - u[2]*v[0]);
