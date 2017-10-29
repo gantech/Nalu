@@ -46,7 +46,7 @@ namespace nalu{
 
 
 // constructor
-ActuatorLineSMDInfo::ActuatorLineSMDInfo() 
+ActuatorLineSMDInfo::ActuatorLineSMDInfo()
   : processorId_(0),
     numPoints_(1)
 {
@@ -62,9 +62,9 @@ ActuatorLineSMDInfo::~ActuatorLineSMDInfo()
 
 
 // constructor
-ActuatorLineSMDPointInfo::ActuatorLineSMDPointInfo( 
+ActuatorLineSMDPointInfo::ActuatorLineSMDPointInfo(
   size_t globTurbId,
-  Point centroidCoords, 
+  Point centroidCoords,
   double searchRadius,
   Coordinates epsilon
   )
@@ -124,13 +124,13 @@ ActuatorLineSMD::compute_elem_force_given_weight(
   const double *pointForce,
   double *elemForce)
 {
-  
+
   for ( int j = 0; j < nDim; ++j )
     elemForce[j] = pointForce[j]*g;
 }
 
 /**
- * This method calculates the isotropic Gaussian projection of width epsilon of 
+ * This method calculates the isotropic Gaussian projection of width epsilon of
  * a unit body force at the actuator point to another point at a distance *dis*
  * \f[
  * g(dis) = \frac{1}{\pi^{3/2}} \epsilon^3} e^{-\left( dis/ \epsilon \right)^2}
@@ -170,7 +170,7 @@ ActuatorLineSMD::load(
     // search specifications
     std::string searchMethodName = "na";
     get_if_present(y_actuatorLine, "search_method", searchMethodName, searchMethodName);
-    
+
     // determine search method for this pair
     if ( searchMethodName == "boost_rtree" )
       searchMethod_ = stk::search::BOOST_RTREE;
@@ -199,7 +199,7 @@ ActuatorLineSMD::load(
     get_required(y_actuatorLine, "t_start", i_smd.t_start);
     get_required(y_actuatorLine, "n_every_checkpoint", i_smd.n_every_checkpoint);
     get_required(y_actuatorLine, "dt_smd", i_smd.dt);
-    get_required(y_actuatorLine, "t_max", i_smd.t_max); // t_max is the total duration to which you want to run SMD. 
+    get_required(y_actuatorLine, "t_max", i_smd.t_max); // t_max is the total duration to which you want to run SMD.
 
     // Only one SMD for now
     ActuatorLineSMDInfo *actuatorLineInfo = new ActuatorLineSMDInfo();
@@ -210,12 +210,12 @@ ActuatorLineSMD::load(
       actuatorLineInfo->epsilon_ = epsilon.as<Coordinates>() ;
     else
       throw std::runtime_error("ActuatorLineSMD: lacking epsilon vector");
-    
+
     p_smd.setInputs(i_smd);
 
   }
 }
-    
+
 /** Called after load, but before initialize. The mesh isn't loaded yet. For now, this function only
     checks that the Nalu time step is an integral multiple of the SMD time step
 */
@@ -225,16 +225,16 @@ ActuatorLineSMD::setup()
   // objective: declare the part, register coordinates; must be before populate_mesh()
 
   double dtNalu = realm_.get_time_step_from_file();
-  tStepRatio_ = dtNalu/i_smd.dt ;  
-  if (std::abs(dtNalu - tStepRatio_ * i_smd.dt) < 0.001) {// TODO: Fix arbitrary number 0.001 
+  tStepRatio_ = dtNalu/i_smd.dt ;
+  if (std::abs(dtNalu - tStepRatio_ * i_smd.dt) < 0.001) {// TODO: Fix arbitrary number 0.001
     NaluEnv::self().naluOutputP0() << "Time step ratio  dtNalu/dtSMD: " << tStepRatio_ << std::endl ;
   } else {
-    throw std::runtime_error("ActuatorLineSMD: Ratio of Nalu's time step is not an integral multiple of SMD time step");     
+    throw std::runtime_error("ActuatorLineSMD: Ratio of Nalu's time step is not an integral multiple of SMD time step");
   }
-  
+
 }
 
-/** This function searches for the processor containing the base point of the SMD system and allocates the SMD 
+/** This function searches for the processor containing the base point of the SMD system and allocates the SMD
  *  to that processor. It does this through a stk::coarse_search of bounding boxes around the processor domains.
 */
 void
@@ -245,7 +245,7 @@ ActuatorLineSMD::allocateSMDToProc()
 
 }
 
-/** This method allocates the turbines to processors, initializes the SMD, populates the  map of 
+/** This method allocates the turbines to processors, initializes the SMD, populates the  map of
  *  ActuatorLinePointInfo with the actuator point and determines the elements associated with each
  *  actuator point.
 */
@@ -261,11 +261,11 @@ ActuatorLineSMD::initialize()
 }
 
 
-/** 
+/**
  * This method should be called whenever the actuator points have moved and does the following:
  *
  * + creates a new map of actuator points in ActuatorLinePointInfoMap,
- * + searches the element bounding boxes for the elements within the search radius of each 
+ * + searches the element bounding boxes for the elements within the search radius of each
  *   actuator point,
  * + identifies the elements to be ghosted to the processor controlling the smd,
  * + identifies the bestElem_ that contains each actuator point.
@@ -274,7 +274,7 @@ void
 ActuatorLineSMD::update()
 {
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
- 
+
   // initialize need to ghost and elems to ghost
   needToGhostCount_ = 0;
   elemsToGhost_.clear();
@@ -284,9 +284,9 @@ ActuatorLineSMD::update()
   for( iterPoint=actuatorLinePointInfoMap_.begin(); iterPoint!=actuatorLinePointInfoMap_.end(); ++iterPoint )
     delete (*iterPoint).second;
   actuatorLinePointInfoMap_.clear();
-  
+
   bulkData.modification_begin();
-  
+
   if ( actuatorLineGhosting_ == NULL) {
     // create new ghosting
     std::string theGhostName = "nalu_actuator_line_ghosting";
@@ -295,9 +295,9 @@ ActuatorLineSMD::update()
   else {
     bulkData.destroy_ghosting(*actuatorLineGhosting_);
   }
-  
+
   bulkData.modification_end();
-  
+
   // clear some of the search info
   boundingSphereVec_.clear();
   boundingElementBoxVec_.clear();
@@ -305,7 +305,7 @@ ActuatorLineSMD::update()
 
   // set all of the candidate elements in the search target names
   populate_candidate_elements();
-  
+
   // create the ActuatorLineSMDPointInfo
   create_actuator_line_point_info_map();
 
@@ -314,15 +314,15 @@ ActuatorLineSMD::update()
 
   // manage ghosting
   manage_ghosting();
-  
+
   // complete filling in the set of elements connected to the centroid
   complete_search();
 
 }
 
 
-/** This function is called at each time step. This samples the velocity at each actuator point, 
- *  advances the OpenFAST turbine models to Nalu's next time step and assembles the source terms 
+/** This function is called at each time step. This samples the velocity at each actuator point,
+ *  advances the OpenFAST turbine models to Nalu's next time step and assembles the source terms
  *  in the momentum equation for Nalu.
 */
 void
@@ -334,23 +334,23 @@ ActuatorLineSMD::execute()
   const int nDim = metaData.spatial_dimension();
 
   // extract fields
-  VectorFieldType *coordinates 
+  VectorFieldType *coordinates
     = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
-  VectorFieldType *actuator_source 
+  VectorFieldType *actuator_source
     = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "actuator_source");
   ScalarFieldType *actuator_source_lhs
     = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "actuator_source_lhs");
   ScalarFieldType *g
     = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "g");
   ScalarFieldType *density
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density"); 
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   ScalarFieldType *dualNodalVolume
-    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume"); 
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
   // deal with proper viscosity
   //  const std::string viscName = realm_.is_turbulent() ? "effective_viscosity" : "viscosity";
   //  ScalarFieldType *viscosity
-  //    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName); 
+  //    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName);
 
   // fixed size scratch
   std::vector<double> ws_pointGasVelocity(nDim);
@@ -359,7 +359,7 @@ ActuatorLineSMD::execute()
   std::vector<double> ws_elemForce(nDim);
   double ws_pointGasDensity;
   //  double ws_pointGasViscosity;
-  
+
   // zero out source term; do this manually since there are custom ghosted entities
   stk::mesh::Selector s_nodes = stk::mesh::selectField(*actuator_source);
   stk::mesh::BucketVector const& node_buckets =
@@ -374,7 +374,7 @@ ActuatorLineSMD::execute()
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
       actSrcLhs[k] = 0.0;
       gF[k] = 0.0;
-      const int offSet = k*nDim;
+      const int offSet = k*3;
       for ( int j = 0; j < nDim; ++j ) {
         actSrc[offSet+j] = 0.0;
       }
@@ -408,7 +408,7 @@ ActuatorLineSMD::execute()
     //==========================================================================
     stk::mesh::Entity bestElem = infoObject->bestElem_;
     int nodesPerElement = bulkData.num_nodes(bestElem);
-    
+
     // resize some work vectors
     resize_std_vector(nDim, ws_coordinates_, bestElem, bulkData);
     resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
@@ -416,31 +416,31 @@ ActuatorLineSMD::execute()
     resize_std_vector(1, ws_density_, bestElem, bulkData);
 
     // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
-    gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem), 
+    gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem),
                  nodesPerElement);
-    gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem), 
+    gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem),
                             nodesPerElement);
-    //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem), 
+    //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem),
     //                            nodesPerElement);
-    gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem), 
+    gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem),
                             nodesPerElement);
 
     // interpolate velocity
-    interpolate_field(nDim, bestElem, bulkData, infoObject->isoParCoords_.data(), 
+    interpolate_field(nDim, bestElem, bulkData, infoObject->isoParCoords_.data(),
                       &ws_velocity_[0], ws_pointGasVelocity.data());
-    
+
     // interpolate viscosity
-    //    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]), 
+    //    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]),
     //                      &ws_viscosity_[0], &ws_pointGasViscosity);
 
     // interpolate density
-    interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(), 
+    interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(),
                       &ws_density_[0], &ws_pointGasDensity);
 
     p_smd.setVelocity_n(ws_pointGasVelocity, np, infoObject->globSMDId_);
     np = np + 1;
 
-  }    
+  }
 
 
 
@@ -449,7 +449,7 @@ ActuatorLineSMD::execute()
     //Step SMD
     for(int j=0; j < tStepRatio_; j++) p_smd.step();
   }
- 
+
   update();
 
   // loop over map and assemble source terms
@@ -469,7 +469,7 @@ ActuatorLineSMD::execute()
     int nodesPerElement = bulkData.num_nodes(bestElem);
 
     p_smd.getForce_np1(ws_pointForce, np, infoObject->globSMDId_);
-    
+
     int iTurbGlob = infoObject->globSMDId_;
 
     // get the vector of elements
@@ -486,12 +486,12 @@ ActuatorLineSMD::execute()
       stk::mesh::Entity elem = elementVec[k];
 
       nodesPerElement = bulkData.num_nodes(elem);
-    
+
       // resize some work vectors
       resize_std_vector(nDim, ws_coordinates_, elem, bulkData);
 
       // gather coordinates
-      gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(elem), 
+      gather_field_inverted_order(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(elem),
                    nodesPerElement);
 
       // compute volume
@@ -504,16 +504,17 @@ ActuatorLineSMD::execute()
       const double distance = compute_distance(nDim, &ws_elemCentroid[0], &(infoObject->centroidCoords_[0]));
 
       double gA = 0.0;
-      
+
       // project the force to this element centroid with projection function
       gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
       compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
       // assemble nodal quantity; no LHS contribution here...
-      assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, ws_elemForce, 
-                               gA, *coordinates, *actuator_source, *g, *dualNodalVolume);
-      for(int j=0; j < nDim; j++) forceSum[j] += ws_elemForce[j]*elemVolume;
+      assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, ws_elemForce,
+                               gA, *coordinates, *actuator_source, *g, *dualNodalVolume,
+                               forceSum);
+//      for(int j=0; j < nDim; j++) forceSum[j] += ws_elemForce[j]*elemVolume;
       gSum += gA*elemVolume;
-	
+
     }
 
     np=np+1;
@@ -526,12 +527,11 @@ ActuatorLineSMD::execute()
   const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
   stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldG);
 
-
 }
 
 // creates bounding boxes around elements belonging to the searchParts
 void
-ActuatorLineSMD::populate_candidate_elements() 
+ActuatorLineSMD::populate_candidate_elements()
 {
   stk::mesh::MetaData & metaData = realm_.meta_data();
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
@@ -551,19 +551,19 @@ ActuatorLineSMD::populate_candidate_elements()
     if ( NULL != thePart )
       searchParts.push_back(thePart);
     else
-      throw std::runtime_error("ActuatorLineSMD: Part is null" + searchTargetNames_[k]);     
+      throw std::runtime_error("ActuatorLineSMD: Part is null" + searchTargetNames_[k]);
   }
 
   // selector and bucket loop
   stk::mesh::Selector s_locally_owned = metaData.locally_owned_part()
     &stk::mesh::selectUnion(searchParts);
-  
+
   stk::mesh::BucketVector const& elem_buckets =
     realm_.get_buckets( stk::topology::ELEMENT_RANK, s_locally_owned );
 
   for ( stk::mesh::BucketVector::const_iterator ib = elem_buckets.begin();
         ib != elem_buckets.end() ; ++ib ) {
-    
+
     stk::mesh::Bucket & b = **ib;
 
     const stk::mesh::Bucket::size_type length   = b.size();
@@ -585,20 +585,20 @@ ActuatorLineSMD::populate_candidate_elements()
 
       for ( int ni = 0; ni < num_nodes; ++ni ) {
         stk::mesh::Entity node = elem_node_rels[ni];
-        
+
         // pointers to real data
         const double * coords = stk::mesh::field_data(*coordinates, node );
-        
+
         // check max/min
         for ( int j = 0; j < nDim; ++j ) {
           minCorner[j] = std::min(minCorner[j], coords[j]);
           maxCorner[j] = std::max(maxCorner[j], coords[j]);
         }
       }
-      
+
       // setup ident
       stk::search::IdentProc<uint64_t,int> theIdent(bulkData.identifier(elem), NaluEnv::self().parallel_rank());
-      
+
       // create the bounding point box and push back
       boundingElementBox theBox(Box(minCorner,maxCorner), theIdent);
       boundingElementBoxVec_.push_back(theBox);
@@ -609,7 +609,7 @@ ActuatorLineSMD::populate_candidate_elements()
 
 // Creates bounding boxes around the subdomain of each processor
 void
-ActuatorLineSMD::populate_candidate_procs() 
+ActuatorLineSMD::populate_candidate_procs()
 {
   stk::mesh::MetaData & metaData = realm_.meta_data();
 
@@ -636,19 +636,19 @@ ActuatorLineSMD::populate_candidate_procs()
     if ( NULL != thePart )
       searchParts.push_back(thePart);
     else
-      throw std::runtime_error("ActuatorLineSMD: Part is null" + searchTargetNames_[k]);     
+      throw std::runtime_error("ActuatorLineSMD: Part is null" + searchTargetNames_[k]);
   }
 
   // selector and bucket loop
   stk::mesh::Selector s_locally_owned = metaData.locally_owned_part()
     &stk::mesh::selectUnion(searchParts);
-  
+
   stk::mesh::BucketVector const& elem_buckets =
     realm_.get_buckets( stk::topology::NODE_RANK, s_locally_owned );
 
   for ( stk::mesh::BucketVector::const_iterator ib = elem_buckets.begin();
         ib != elem_buckets.end() ; ++ib ) {
-    
+
     stk::mesh::Bucket & b = **ib;
 
     const stk::mesh::Bucket::size_type length   = b.size();
@@ -660,27 +660,27 @@ ActuatorLineSMD::populate_candidate_procs()
 
       // pointers to real data
       const double * coords = stk::mesh::field_data(*coordinates, node );
-        
+
       // check max/min
       for ( int j = 0; j < nDim; ++j ) {
 	minCorner[0][j] = std::min(minCorner[0][j], coords[j]);
 	maxCorner[0][j] = std::max(maxCorner[0][j], coords[j]);
       }
 
-    }      
+    }
   }
 
   stk::parallel_vector_concat(NaluEnv::self().parallel_comm(), minCorner, gMinCorner);
   stk::parallel_vector_concat(NaluEnv::self().parallel_comm(), maxCorner, gMaxCorner);
-  
+
   for(int j = 0; j < NaluEnv::self().parallel_size(); j++) {
     // setup ident
     stk::search::IdentProc<uint64_t,int> theIdent(j, j);
-    
+
     // create the bounding point box and push back
     boundingElementBox theBox(Box(gMinCorner[j],gMaxCorner[j]), theIdent);
     boundingProcBoxVec_.push_back(theBox);
-    
+
   }
 
 }
@@ -691,7 +691,7 @@ ActuatorLineSMD::determine_elems_to_ghost()
 {
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
 
-  stk::search::coarse_search(boundingSphereVec_, boundingElementBoxVec_, searchMethod_, 
+  stk::search::coarse_search(boundingSphereVec_, boundingElementBoxVec_, searchMethod_,
                              NaluEnv::self().parallel_comm(), searchKeyPair_);
 
   // lowest effort is to ghost elements to the owning rank of the point; can just as easily do the opposite
@@ -705,7 +705,7 @@ ActuatorLineSMD::determine_elems_to_ghost()
     if ( (box_proc == theRank) && (pt_proc != theRank) ) {
 
       // Send box to pt proc
-      
+
       // find the element
       stk::mesh::Entity theElemMeshObj = bulkData.get_entity(stk::topology::ELEMENT_RANK, theBox);
       if ( !(bulkData.is_valid(theElemMeshObj)) )
@@ -728,50 +728,50 @@ ActuatorLineSMD::determine_elems_to_ghost()
 void
 ActuatorLineSMD::create_actuator_line_point_info_map() {
 
-  stk::mesh::MetaData & metaData = realm_.meta_data(); 
+  stk::mesh::MetaData & metaData = realm_.meta_data();
   const int nDim = metaData.spatial_dimension();
 
   size_t np = 0;
 
   for ( size_t iTurb = 0; iTurb < actuatorLineInfo_.size(); ++iTurb ) {
-    
+
     const ActuatorLineSMDInfo *actuatorLineInfo = actuatorLineInfo_[iTurb];
-    
+
     int processorId = p_smd.get_procNo(iTurb);
     if ( processorId == NaluEnv::self().parallel_rank() ) {
-      
+
       // define a point that will hold the centroid
       Point centroidCoords;
-    
+
       // scratch array for coordinates and dummy array for velocity
       std::vector<double> currentCoords (3,0.0);
 
       // loop over all points for this turbine
-      const int numForcePts = 1; 
-      
+      const int numForcePts = 1;
+
       if (! p_smd.isDryRun() ) {
 	for(int iNode = 0; iNode < numForcePts; iNode++) {
 	  stk::search::IdentProc<uint64_t,int> theIdent(np, NaluEnv::self().parallel_rank());
-	  
+
 	  // set model coordinates from SMD
 	  // move the coordinates
 	  p_smd.getCoordinates_np1(currentCoords, 0, 0);
 
           double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
-	  
+
 	  for ( int j = 0; j < nDim; ++j )
 	    centroidCoords[j] = currentCoords[j];
-	  
+
 	  // create the bounding point sphere and push back
 	  boundingSphere theSphere( Sphere(centroidCoords, searchRadius), theIdent);
 	  boundingSphereVec_.push_back(theSphere);
-	  
+
 	  // create the point info and push back to map
-	  ActuatorLineSMDPointInfo *actuatorLinePointInfo 
-	    = new ActuatorLineSMDPointInfo(iTurb, centroidCoords, 
+	  ActuatorLineSMDPointInfo *actuatorLinePointInfo
+	    = new ActuatorLineSMDPointInfo(iTurb, centroidCoords,
 					    searchRadius, actuatorLineInfo->epsilon_);
 	  actuatorLinePointInfoMap_[np] = actuatorLinePointInfo;
-	  
+
 	  np=np+1;
 	}
 
@@ -779,7 +779,7 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
       else {
 	NaluEnv::self().naluOutput() << "Proc " << NaluEnv::self().parallel_rank() << " glob iTurb " << iTurb << std::endl ;
       }
-      
+
     }
 
   }
@@ -791,7 +791,7 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
 //-------- manage_ghosting -------------------------------------------------
 //--------------------------------------------------------------------------
 void
-ActuatorLineSMD::manage_ghosting() 
+ActuatorLineSMD::manage_ghosting()
 {
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
 
@@ -810,8 +810,8 @@ ActuatorLineSMD::manage_ghosting()
   }
 
 }
- 
- 
+
+
 //--------------------------------------------------------------------------
 //-------- complete_search -------------------------------------------------
 //--------------------------------------------------------------------------
@@ -823,9 +823,9 @@ ActuatorLineSMD::complete_search()
   const int nDim = metaData.spatial_dimension();
 
   // extract fields
-  VectorFieldType *coordinates 
+  VectorFieldType *coordinates
     = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
- 
+
   // now proceed with the standard search
   std::vector<std::pair<boundingSphere::second_type, boundingElementBox::second_type> >::const_iterator ii;
   for( ii=searchKeyPair_.begin(); ii!=searchKeyPair_.end(); ++ii ) {
@@ -838,7 +838,7 @@ ActuatorLineSMD::complete_search()
     // check if I own the point...
     if ( theRank == pt_proc ) {
 
-      // yes, I own the point... 
+      // yes, I own the point...
 
       // proceed as required; all elements should have already been ghosted via the coarse search
       stk::mesh::Entity elem = bulkData.get_entity(stk::topology::ELEMENT_RANK, theBox);
@@ -850,29 +850,29 @@ ActuatorLineSMD::complete_search()
       iterPoint=actuatorLinePointInfoMap_.find(thePt);
       if ( iterPoint == actuatorLinePointInfoMap_.end() )
         throw std::runtime_error("no valid entry for actuatorLinePointInfoMap_");
-      
-      // extract the point object and push back the element to either the best 
+
+      // extract the point object and push back the element to either the best
       // candidate or the standard vector of elements
       ActuatorLineSMDPointInfo *actuatorLinePointInfo = iterPoint->second;
 
       // extract topo and master element for this topo
       const stk::mesh::Bucket &theBucket = bulkData.bucket(elem);
       const stk::topology &elemTopo = theBucket.topology();
-      MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
+      MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
       const int nodesPerElement = meSCS->nodesPerElement_;
 
       // gather elemental coords
       std::vector<double> elementCoords(nDim*nodesPerElement);
-      gather_field(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem), 
+      gather_field(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem),
                    nodesPerElement);
 
-      
+
       // find isoparametric points
       std::vector<double> isoParCoords(nDim);
       const double nearestDistance = meSCS->isInElement(&elementCoords[0],
                                                         &(actuatorLinePointInfo->centroidCoords_[0]),
                                                         &(isoParCoords[0]));
- 
+
 
       // save off best element and its isoparametric coordinates for this point
       if ( nearestDistance < actuatorLinePointInfo->bestX_ ) {
@@ -894,14 +894,14 @@ ActuatorLineSMD::complete_search()
 //-------- resize_std_vector -----------------------------------------------
 //--------------------------------------------------------------------------
 void
-ActuatorLineSMD::resize_std_vector( 
+ActuatorLineSMD::resize_std_vector(
   const int &sizeOfField,
-  std::vector<double> &theVector,   
-  stk::mesh::Entity elem, 
+  std::vector<double> &theVector,
+  stk::mesh::Entity elem,
   const stk::mesh::BulkData & bulkData)
 {
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
+  MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
   const int nodesPerElement = meSCS->nodesPerElement_;
   theVector.resize(nodesPerElement*sizeOfField);
 }
@@ -913,19 +913,40 @@ ActuatorLineSMD::resize_std_vector(
 void
 ActuatorLineSMD::gather_field(
   const int &sizeOfField,
-  double *fieldToFill, 
+  double *fieldToFill,
   const stk::mesh::FieldBase &stkField,
-  stk::mesh::Entity const* elem_node_rels, 
-  const int &nodesPerElement) 
+  stk::mesh::Entity const* elem_node_rels,
+  const int &nodesPerElement)
 {
-  for ( int ni = 0; ni < nodesPerElement; ++ni ) { 
-    stk::mesh::Entity node = elem_node_rels[ni];     
+  for ( int ni = 0; ni < nodesPerElement; ++ni ) {
+    stk::mesh::Entity node = elem_node_rels[ni];
     const double * theField = (double*)stk::mesh::field_data(stkField, node );
-    for ( int j = 0; j < sizeOfField; ++j ) { 
-      const int offSet = ni*sizeOfField+j;
+    for ( int j = 0; j < sizeOfField; ++j ) {
+      const int offSet = j*nodesPerElement+ni;
       fieldToFill[offSet] = theField[j];
-    }   
-  }   
+    }
+  }
+}
+
+//--------------------------------------------------------------------------
+//-------- gather_field ----------------------------------------------------
+//--------------------------------------------------------------------------
+void
+ActuatorLineSMD::gather_field_inverted_order(
+    const int &sizeOfField,
+    double *fieldToFill,
+    const stk::mesh::FieldBase &stkField,
+    stk::mesh::Entity const* elem_node_rels,
+    const int &nodesPerElement)
+{
+    for ( int ni = 0; ni < nodesPerElement; ++ni ) {
+        stk::mesh::Entity node = elem_node_rels[ni];
+        const double * theField = (double*)stk::mesh::field_data(stkField, node );
+        for ( int j = 0; j < sizeOfField; ++j ) {
+            const int offSet = ni*sizeOfField+j;
+            fieldToFill[offSet] = theField[j];
+        }
+    }
 }
 
 
@@ -935,19 +956,19 @@ ActuatorLineSMD::gather_field(
 void
 ActuatorLineSMD::gather_field_for_interp(
   const int &sizeOfField,
-  double *fieldToFill, 
+  double *fieldToFill,
   const stk::mesh::FieldBase &stkField,
-  stk::mesh::Entity const* elem_node_rels, 
-  const int &nodesPerElement) 
+  stk::mesh::Entity const* elem_node_rels,
+  const int &nodesPerElement)
 {
-  for ( int ni = 0; ni < nodesPerElement; ++ni ) { 
-    stk::mesh::Entity node = elem_node_rels[ni];     
+  for ( int ni = 0; ni < nodesPerElement; ++ni ) {
+    stk::mesh::Entity node = elem_node_rels[ni];
     const double * theField = (double*)stk::mesh::field_data(stkField, node );
-    for ( int j = 0; j < sizeOfField; ++j ) { 
-      const int offSet = j*nodesPerElement + ni; 
+    for ( int j = 0; j < sizeOfField; ++j ) {
+      const int offSet = j*nodesPerElement + ni;
       fieldToFill[offSet] = theField[j];
-    }   
-  }   
+    }
+  }
 }
 
 
@@ -957,12 +978,12 @@ ActuatorLineSMD::gather_field_for_interp(
 double
 ActuatorLineSMD::compute_volume(
   const int &nDim,
-  stk::mesh::Entity elem, 
-  const stk::mesh::BulkData & bulkData) 
+  stk::mesh::Entity elem,
+  const stk::mesh::BulkData & bulkData)
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCV = sierra::nalu::get_volume_master_element(elemTopo);
+  MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(elemTopo);
   const int numScvIp = meSCV->numIntPoints_;
 
   // compute scv for this element
@@ -984,22 +1005,22 @@ ActuatorLineSMD::compute_volume(
 void
 ActuatorLineSMD::interpolate_field(
   const int &sizeOfField,
-  stk::mesh::Entity elem, 
+  stk::mesh::Entity elem,
   const stk::mesh::BulkData & bulkData,
   double *isoParCoords,
   const double *fieldAtNodes,
-  double *pointField) 
+  double *pointField)
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCS = sierra::nalu::get_surface_master_element(elemTopo);
-  
+  MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(elemTopo);
+
   // interpolate velocity to this best point
   meSCS->interpolatePoint(
     sizeOfField,
     isoParCoords,
     fieldAtNodes,
-    pointField); 
+    pointField);
 }
 
 
@@ -1010,12 +1031,12 @@ void
 ActuatorLineSMD::compute_elem_centroid(
   const int &nDim,
   double *elemCentroid,
-  const int & nodesPerElement) 
+  const int & nodesPerElement)
 {
   // zero
   for ( int j = 0; j < nDim; ++j )
     elemCentroid[j] = 0.0;
-  
+
   // assemble
   for ( int ni = 0; ni < nodesPerElement; ++ni ) {
     for ( int j=0; j < nDim; ++j ) {
@@ -1032,8 +1053,8 @@ double
 ActuatorLineSMD::compute_distance(
   const int &nDim,
   const double *elemCentroid,
-  const double *pointCentroid) 
-{ 
+  const double *pointCentroid)
+{
   double distance = 0.0;
   for ( int j = 0; j < nDim; ++j )
     distance += std::pow(elemCentroid[j] - pointCentroid[j], 2);
@@ -1056,17 +1077,18 @@ ActuatorLineSMD::assemble_source_to_nodes(
   stk::mesh::FieldBase & elemCoords,
   stk::mesh::FieldBase & actuator_source,
   stk::mesh::FieldBase & g,
-  stk::mesh::FieldBase & dualNodalVolume
+  stk::mesh::FieldBase & dualNodalVolume,
+  std::vector<double>& forceSum
 )
 {
   // extract master element from the bucket in which the element resides
   const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCV = sierra::nalu::get_volume_master_element(elemTopo);
+  MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(elemTopo);
   const int numScvIp = meSCV->numIntPoints_;
 
   // extract elem_node_relations
   stk::mesh::Entity const* elem_node_rels = bulkData.begin_nodes(elem);
-  
+
   // assemble to nodes
   const int *ipNodeMap = meSCV->ipNodeMap();
   for ( int ip = 0; ip < numScvIp; ++ip ) {
@@ -1077,6 +1099,7 @@ ActuatorLineSMD::assemble_source_to_nodes(
     // extract node and pointer to source term
     stk::mesh::Entity node = elem_node_rels[nearestNode];
     double * sourceTerm = (double*)stk::mesh::field_data(actuator_source, node );
+    double * dVol = (double *)stk::mesh::field_data(dualNodalVolume, node);
     double * gGlobal = (double*)stk::mesh::field_data(g, node);
 
     // nodal weight based on volume weight
@@ -1084,10 +1107,11 @@ ActuatorLineSMD::assemble_source_to_nodes(
     *gGlobal += gLocal;
     for ( int j=0; j < nDim; ++j ) {
       sourceTerm[j] += nodalWeight * elemForce[j];
+      forceSum[j] += nodalWeight * elemForce[j] * (*dVol);
     }
 
   }
-} 
+}
 
 
 } // namespace nalu
