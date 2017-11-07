@@ -594,10 +594,6 @@ TurbulenceAveragingPostProcessing::execute()
       compute_tke(false, avInfo->name_, s_all_nodes);
     }
 
-    if ( avInfo->computeSFSStress_ ) {
-        compute_sfs_stress(avInfo->name_, s_all_nodes);
-    }
-
     if ( avInfo->computeVorticity_ ) {
       compute_vorticity(avInfo->name_, s_all_nodes);
     }
@@ -623,7 +619,11 @@ TurbulenceAveragingPostProcessing::execute()
 
       if ( avInfo->computeResolvedStress_ ) {
           compute_resolved_stress(avInfo->name_, oldTimeFilter, zeroCurrent, dt, s_all_nodes);
-      }      
+      }
+
+      if ( avInfo->computeSFSStress_ ) {
+          compute_sfs_stress(avInfo->name_, oldTimeFilter, zeroCurrent, dt, s_all_nodes);
+      }
     }
   }
 }
@@ -876,6 +876,9 @@ TurbulenceAveragingPostProcessing::compute_favre_stress(
 void
 TurbulenceAveragingPostProcessing::compute_sfs_stress(
   const std::string &averageBlockName,
+  const double &oldTimeFilter,
+  const double &zeroCurrent,
+  const double &dt,
   stk::mesh::Selector s_all_nodes)
 {
   stk::mesh::MetaData & metaData = realm_.meta_data();
@@ -938,7 +941,8 @@ TurbulenceAveragingPostProcessing::compute_sfs_stress(
           for ( int j = i; j < nDim; ++j ) {
               const double divUTerm = ( i == j ) ? 2.0/3.0*divU : 0.0;
               const double sfsTKEterm = ( i == j ) ? 2.0/3.0*sfstke : 0.0;
-              sfsstress_[k*offSet + componentCount] = -density_[k]*(turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm) - sfsTKEterm);
+              const double newStress = (sfsstress_[k*offSet + componentCount]*oldTimeFilter*zeroCurrent -dt*(turbNu_[k]*(dudx_[k*offSet+(nDim*i+j)] + dudx_[k*offSet+(nDim*j+i)] - divUTerm) - sfsTKEterm))/currentTimeFilter_ ;
+              sfsstress_[k*offSet + componentCount] = newStress;
               componentCount++;
           }
       }
