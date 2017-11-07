@@ -507,6 +507,7 @@ TurbulenceAveragingPostProcessing::execute()
 
     // size
     size_t reynoldsFieldPairSize = avInfo->reynoldsFieldVecPair_.size();
+    size_t resolvedFieldPairSize = avInfo->resolvedFieldVecPair_.size();
     size_t favreFieldPairSize = avInfo->favreFieldVecPair_.size();
 
     // define some common selectors
@@ -550,6 +551,20 @@ TurbulenceAveragingPostProcessing::execute()
           }
         }
 
+        // resolved next 
+        for ( size_t iav = 0; iav < resolvedFieldPairSize; ++iav ) {
+            stk::mesh::FieldBase *primitiveFB = avInfo->resolvedFieldVecPair_[iav].first;
+            stk::mesh::FieldBase *averageFB = avInfo->resolvedFieldVecPair_[iav].second;
+            const double * primitive = (double*)stk::mesh::field_data(*primitiveFB, node);
+            double * average = (double*)stk::mesh::field_data(*averageFB, node);
+            // get size
+            const int fieldSize = avInfo->resolvedFieldSizeVec_[iav];
+            for ( int j = 0; j < fieldSize; ++j ) {
+                const double averageField = (average[j]*oldTimeFilter*zeroCurrent + primitive[j]*dt)/currentTimeFilter_;
+                average[j] = averageField;
+            }
+        }
+        
         // save off density for below Favre procedure
         const double rho = density[k];
         const double rhoRA  = densityRA[k];
@@ -605,6 +620,10 @@ TurbulenceAveragingPostProcessing::execute()
       if ( avInfo->computeReynoldsStress_ ) {
         compute_reynolds_stress(avInfo->name_, oldTimeFilter, zeroCurrent, dt, s_all_nodes);
       }
+
+      if ( avInfo->computeResolvedStress_ ) {
+          compute_resolved_stress(avInfo->name_, oldTimeFilter, zeroCurrent, dt, s_all_nodes);
+      }      
     }
   }
 }
