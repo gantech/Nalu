@@ -127,10 +127,22 @@ TurbulenceAveragingPostProcessing::load(
           }
         }
 
+        // Resolved stress
+        const YAML::Node y_resolved = y_spec["resolved_averaged_variables"];
+        if (y_resolved) {
+            for (size_t ioption = 0; ioption < y_resolved.size(); ++ioption) {
+                const YAML::Node y_var = y_resolved[ioption];
+                std::string fieldName = y_var.as<std::string>() ;
+                if ( fieldName != "density" )
+                    avInfo->resolvedFieldNameVec_.push_back(fieldName);
+            }
+        }
+
         // check for stress and tke post processing; Reynolds and Favre
         get_if_present(y_spec, "compute_reynolds_stress", avInfo->computeReynoldsStress_, avInfo->computeReynoldsStress_);
         get_if_present(y_spec, "compute_tke", avInfo->computeTke_, avInfo->computeTke_);
         get_if_present(y_spec, "compute_favre_stress", avInfo->computeFavreStress_, avInfo->computeFavreStress_);
+        get_if_present(y_spec, "compute_resolved_stress", avInfo->computeResolvedStress_, avInfo->computeResolvedStress_);
         get_if_present(y_spec, "compute_favre_tke", avInfo->computeFavreTke_, avInfo->computeFavreTke_);
         get_if_present(y_spec, "compute_sfs_stress", avInfo->computeSFSStress_, avInfo->computeSFSStress_);
         get_if_present(y_spec, "compute_vorticity", avInfo->computeVorticity_, avInfo->computeVorticity_);
@@ -154,6 +166,14 @@ TurbulenceAveragingPostProcessing::load(
           }
         }
 
+        if ( avInfo->computeResolvedStress_ ) {
+            const std::string velocityName = "velocity";
+            if ( std::find(avInfo->resolvedFieldNameVec_.begin(), avInfo->resolvedFieldNameVec_.end(), velocityName) == avInfo->resolvedFieldNameVec_.end() ) {
+                // not found; add it
+                avInfo->resolvedFieldNameVec_.push_back(velocityName);
+            }
+        }
+        
         // push back the object
         averageInfoVec_.push_back(avInfo);
       }
@@ -235,6 +255,11 @@ TurbulenceAveragingPostProcessing::setup()
         register_field(stressName, stressSize, metaData, targetPart);
       }
 
+      if ( avInfo->computeResolvedStress_ ) {
+          const std::string stressName = "resolved_stress";
+          register_field(stressName, stressSize, metaData, targetPart);
+      }
+
       if ( avInfo->computeSFSStress_ ) {
 	if (realm_.spatialDimension_ < 3)
 	  throw std::runtime_error("TurbulenceAveragingPostProcessing:setup() Cannot compute SFS stress in less than 3 dimensions: ");
@@ -260,6 +285,14 @@ TurbulenceAveragingPostProcessing::setup()
         const std::string averagedName = primitiveName + "_fa_" + averageBlockName;
         register_field_from_primitive(primitiveName, averagedName, metaData, targetPart);
       }
+
+      // Resolved
+      for ( size_t i = 0; i < avInfo->resolvedFieldNameVec_.size(); ++i ) {
+          const std::string primitiveName = avInfo->resolvedFieldNameVec_[i];
+          const std::string averagedName = primitiveName + "_resa_" + averageBlockName;
+          register_field_from_primitive(primitiveName, averagedName, metaData, targetPart);
+      }
+      
     }
 
     // now deal with pairs; extract density
@@ -284,6 +317,14 @@ TurbulenceAveragingPostProcessing::setup()
       const std::string averagedName = primitiveName + "_fa_" + averageBlockName;
       construct_pair(primitiveName, averagedName, avInfo->favreFieldVecPair_, avInfo->favreFieldSizeVec_, metaData);
     }
+
+    // Resolved
+    for ( size_t i = 0; i < avInfo->resolvedFieldNameVec_.size(); ++i ) {
+        const std::string primitiveName = avInfo->resolvedFieldNameVec_[i];
+        const std::string averagedName = primitiveName + "_resa_" + averageBlockName;
+        construct_pair(primitiveName, averagedName, avInfo->resolvedFieldVecPair_, avInfo->resolvedFieldSizeVec_, metaData);
+    }
+    
 
     // output what we have done here...
     review(avInfo);
@@ -411,6 +452,10 @@ TurbulenceAveragingPostProcessing::review(
 
   if ( avInfo->computeFavreStress_ ) {
     NaluEnv::self().naluOutputP0() << "Favre Stress will be computed; add favre_stress to output"<< std::endl;
+  }
+
+  if ( avInfo->computeResolvedStress_ ) {
+      NaluEnv::self().naluOutputP0() << "Resolved Stress will be computed; add resolved_stress to output"<< std::endl;
   }
 
   if ( avInfo->computeSFSStress_ ) {
@@ -674,6 +719,61 @@ TurbulenceAveragingPostProcessing::compute_reynolds_stress(
     }
   }
 }
+
+//--------------------------------------------------------------------------
+//-------- compute_resolved_stress -----------------------------------------
+//--------------------------------------------------------------------------
+void
+TurbulenceAveragingPostProcessing::compute_resolved_stress(
+  const std::string &averageBlockName,
+  const double &oldTimeFilter,
+  const double &zeroCurrent,
+  const double &dt,
+  stk::mesh::Selector s_all_nodes)
+{
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  const int nDim = realm_.spatialDimension_;
+  const int stressSize = realm_.spatialDimension_ == 3 ? 6 : 3;
+
+  const std::string stressName = "resolved_stress";
+
+  // extract fields
+  stk::mesh::FieldBase *velocity = metaData.get_field(stk::topology::NODE_RANK, "velocity");
+  stk::mesh::FieldBase *stressA = metaData.get_field(stk::topology::NODE_RANK, stressName);
+
+  stk::mesh::BucketVector const& node_buckets_stress =
+    realm_.get_buckets( stk::topology::NODE_RANK, s_all_nodes );
+  for ( stk::mesh::BucketVector::const_iterator ib = node_buckets_stress.begin();
+        ib != node_buckets_stress.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+
+    // fields
+    const double *uNp1 = (double*)stk::mesh::field_data(*velocity, b);
+    double *stress = (double*)stk::mesh::field_data(*stressA, b);
+
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+
+      // stress is symmetric, so only save off 6 or 3 components
+      int componentCount = 0;
+      for ( int i = 0; i < nDim; ++i ) {
+        const double ui = uNp1[k*nDim+i];
+
+        for ( int j = i; j < nDim; ++j ) {
+          const int component = componentCount;
+          const double uj = uNp1[k*nDim+j];
+          const double newStress
+            = (stress[k*stressSize+component]*oldTimeFilter*zeroCurrent
+               + ui*uj*dt)/currentTimeFilter_ ;
+          stress[k*stressSize+component] = newStress;
+          componentCount++;
+        }
+      }
+    }
+  }
+}
+
 
 //--------------------------------------------------------------------------
 //-------- compute_favre_stress --------------------------------------------

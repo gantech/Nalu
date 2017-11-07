@@ -94,6 +94,13 @@ public:
     const double &dt,
     stk::mesh::Selector s_all_nodes);
 
+  void compute_resolved_stress(
+      const std::string &averageBlockName,
+      const double &oldTimeFilter,
+      const double &zeroCurrent,
+      const double &dt,
+      stk::mesh::Selector s_all_nodes);
+
   void compute_sfs_stress(
       const std::string &averageBlockName,
       stk::mesh::Selector s_all_nodes);
