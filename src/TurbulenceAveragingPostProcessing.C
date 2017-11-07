@@ -265,7 +265,9 @@ TurbulenceAveragingPostProcessing::setup()
           const std::string stressName = "resolved_stress";
           register_field(stressName, stressSize, metaData, targetPart);
           const std::string tempStressName = "temp_resolved_stress";
-          register_field(tempStressName, tempStressSize, metaData, targetPart);          
+          register_field(tempStressName, tempStressSize, metaData, targetPart);
+          const std::string tempVarName = "temp_var";
+          register_field(tempVarName, 1, metaData, targetPart);          
       }
 
       if ( avInfo->computeSFSStress_ ) {
@@ -775,12 +777,14 @@ TurbulenceAveragingPostProcessing::compute_resolved_stress(
   
   const std::string stressName = "resolved_stress";
   const std::string tempStressName = "temp_resolved_stress";
+  const std::string tempVarName = "temp_var";
 
   // extract fields
   stk::mesh::FieldBase *velocity = metaData.get_field(stk::topology::NODE_RANK, "velocity");
   stk::mesh::FieldBase *stressA = metaData.get_field(stk::topology::NODE_RANK, stressName);
   stk::mesh::FieldBase *temperature = metaData.get_field(stk::topology::NODE_RANK, "temperature");
-  stk::mesh::FieldBase *tempStressA = metaData.get_field(stk::topology::NODE_RANK, stressName);
+  stk::mesh::FieldBase *tempStressA = metaData.get_field(stk::topology::NODE_RANK, tempStressName);
+  stk::mesh::FieldBase *tempVarA = metaData.get_field(stk::topology::NODE_RANK, tempVarName);
 
   stk::mesh::BucketVector const& node_buckets_stress =
     realm_.get_buckets( stk::topology::NODE_RANK, s_all_nodes );
@@ -794,6 +798,7 @@ TurbulenceAveragingPostProcessing::compute_resolved_stress(
     double *stress = (double*)stk::mesh::field_data(*stressA, b);
     const double *tempNp1 = (double*)stk::mesh::field_data(*temperature, b);
     double *tempStress = (double*)stk::mesh::field_data(*tempStressA, b);
+    double *tempVar = (double*)stk::mesh::field_data(*tempVarA, b);
 
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
@@ -814,6 +819,8 @@ TurbulenceAveragingPostProcessing::compute_resolved_stress(
 
         const double newTempStress = (tempStress[k*tempStressSize+i]*oldTimeFilter*zeroCurrent + ui * tempNp1[k]*dt)/currentTimeFilter_ ;
         tempStress[k*tempStressSize+i] = newTempStress;
+
+        tempVar[k] = (tempVar[k]*oldTimeFilter*zeroCurrent + tempNp1[k] * tempNp1[k]*dt)/currentTimeFilter_ ;
       }
     }
   }
