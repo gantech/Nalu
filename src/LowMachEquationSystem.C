@@ -101,6 +101,7 @@
 // consolidated approach
 #include <ContinuityAdvElemKernel.h>
 #include <ContinuityMassElemKernel.h>
+#include <user_functions/ContinuitySMDSrcElemKernel.h>
 #include <MomentumAdvDiffElemKernel.h>
 #include <MomentumActuatorSrcElemKernel.h>
 #include <MomentumBuoyancyBoussinesqSrcElemKernel.h>
@@ -108,6 +109,7 @@
 #include <MomentumCoriolisSrcElemKernel.h>
 #include <MomentumMassElemKernel.h>
 #include <MomentumUpwAdvDiffElemKernel.h>
+#include <user_functions/MomentumSMDSrcElemKernel.h>
 
 // nso
 #include <nso/MomentumNSOElemKernel.h>
@@ -155,6 +157,10 @@
 
 #include <user_functions/KovasznayVelocityAuxFunction.h>
 #include <user_functions/KovasznayPressureAuxFunction.h>
+
+#include <user_functions/SMDVelocityAuxFunction.h>
+#include <user_functions/SMDPressureAuxFunction.h>
+
 
 #include <overset/UpdateOversetFringeAlgorithmDriver.h>
 
@@ -570,6 +576,9 @@ LowMachEquationSystem::register_initial_condition_fcn(
     }
     else if ( fcnName == "SinProfileChannelFlow" ) {
       theAuxFunc = new SinProfileChannelFlowVelocityAuxFunction(0,nDim);
+    }
+    else if ( fcnName == "smd_mms_velocity" ) {
+        theAuxFunc = new SMDVelocityAuxFunction(0,nDim);
     }
     else {
       throw std::runtime_error("InitialCondFunction::non-supported velocity IC"); 
@@ -1243,6 +1252,10 @@ MomentumEquationSystem::register_interior_algorithm(
       build_topo_kernel_if_requested<MomentumCoriolisSrcElemKernel>
         (partTopo, *this, activeKernels, "lumped_EarthCoriolis",
          realm_.bulk_data(), *realm_.solutionOptions_, velocity_, dataPreReqs, true);
+
+      build_topo_kernel_if_requested<MomentumSMDSrcElemKernel>
+          (partTopo, *this, activeKernels, "smd_mms",
+           realm_.bulk_data(), *realm_.solutionOptions_, dataPreReqs, false);
  
       report_invalid_supp_alg_names();
       report_built_supp_alg_names();
@@ -1450,6 +1463,9 @@ MomentumEquationSystem::register_inflow_bc(
     }
     else if ( fcnName == "kovasznay") {
       theAuxFunc = new KovasznayVelocityAuxFunction(0,nDim);
+    }
+    else if ( fcnName == "smd_mms_velocity" ) {
+        theAuxFunc = new SMDVelocityAuxFunction(0,nDim);
     }
     else {
       throw std::runtime_error("MomentumEquationSystem::register_inflow_bc: limited functions supported");
@@ -2395,6 +2411,10 @@ ContinuityEquationSystem::register_interior_algorithm(
           (partTopo, *this, activeKernels, "advection",
            realm_.bulk_data(), *realm_.solutionOptions_, dataPreReqs);
 
+        build_topo_kernel_if_requested<ContinuitySMDSrcElemKernel>
+            (partTopo, *this, activeKernels, "smd_mms",
+             realm_.bulk_data(), *realm_.solutionOptions_, dataPreReqs);
+        
         report_invalid_supp_alg_names();
         report_built_supp_alg_names();
       }
@@ -2517,6 +2537,9 @@ ContinuityEquationSystem::register_inflow_bc(
     }
     else if ( fcnName == "kovasznay") {
       theAuxFunc = new KovasznayVelocityAuxFunction(0,nDim);
+    }
+    else if ( fcnName == "smd_mms_velocity" ) {
+        theAuxFunc = new SMDVelocityAuxFunction(0,nDim);
     }
     else {
       throw std::runtime_error("ContEquationSystem::register_inflow_bc: limited functions supported");
@@ -2930,6 +2953,9 @@ ContinuityEquationSystem::register_initial_condition_fcn(
     }
     else if ( fcnName == "kovasznay" ) {
       theAuxFunc = new KovasznayPressureAuxFunction();
+    }
+    else if ( fcnName == "smd_mms_pressure" ) {
+        theAuxFunc = new SMDPressureAuxFunction();
     }
     else {
       throw std::runtime_error("ContinuityEquationSystem::register_initial_condition_fcn: limited functions supported");

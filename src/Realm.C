@@ -4837,7 +4837,6 @@ Realm::get_inactive_selector()
   // provide inactive Overset part that excludes background surface
   stk::mesh::Selector inactiveOverSetSelector =
     (hasOverset_) ? oversetManager_->get_inactive_selector()
->>>>>>> actLineHO
     : stk::mesh::Selector();
 
   // provide inactive dataProbe parts

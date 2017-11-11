@@ -38,9 +38,9 @@ MomentumSMDSrcElemKernel<AlgTraits>::MomentumSMDSrcElemKernel(
     sigma_(0.5),
     alpha_(1.0),
     omega_(1.0),
-    M_(10.0),
+    M_(1.0),
     C_(1.0),
-    K_(1.0),
+    K_(10.0),
     mu_(1e-5)
 {
   const stk::mesh::MetaData& metaData = bulkData.mesh_meta_data();
@@ -84,14 +84,17 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
 
   // Forcing nDim = 3 instead of using AlgTraits::nDim_ here to avoid compiler
   // warnings when this template is instantiated for 2-D topologies.
-  DoubleType w_scvCoords[3] KOKKOS_ALIGN(64);
+  DoubleType NALU_ALIGN(64) w_scvCoords[3];
 
   SharedMemView<DoubleType**>& v_coordinates = scratchViews.get_scratch_view_2D(*coordinates_);
   SharedMemView<DoubleType*>& v_scv_volume = scratchViews.get_me_views(CURRENT_COORDINATES).scv_volume;
 
   DoubleType sigma2 = sigma_ * sigma_;
   DoubleType oneOverSigma2 = 1.0/sigma2 ;
-  DoubleType oneOverSigma4 = oneOverSigma2 * oneOverSigma2 ;
+  DoubleType oneOverSigma5 = oneOverSigma2 * oneOverSigma2 / sigma_ ;
+  DoubleType sinomegat = stk::math::sin(omega_ * cur_time_);
+  DoubleType sin2omegat = stk::math::sin(2.0 * omega_ * cur_time_);
+  DoubleType cosomegat = stk::math::cos(omega_ * cur_time_);
 
   for (int ip=0; ip < AlgTraits::numScvIp_; ++ip) {
 
@@ -108,19 +111,34 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
             w_scvCoords[j] += r*v_coordinates(ic,j);
     }
 
-    DoubleType xCoord = w_scvCoords[0];
-    DoubleType yCoord = w_scvCoords[1];
+    DoubleType x = w_scvCoords[0];
+    DoubleType y = w_scvCoords[1];
 
-    DoubleType yrels = yCoord - alpha_ * stk::math::sin(omega_ * cur_time_);
-    DoubleType expfn = stk::math::exp(-(xCoord*xCoord + yrels*yrels)*oneOverSigma2);
+    DoubleType yrels = y - alpha_ * sinomegat;
+    DoubleType expfn = stk::math::exp(-(x*x + yrels*yrels)*oneOverSigma2);
+    DoubleType fsiForce = alpha_ * ( omega_*cosomegat*C_ + (K_ - omega_*omega_*M_)*sinomegat ) ;
 
     // Compute RHS contributions
     const DoubleType scV = v_scv_volume(ip);
     const int nnNdim = nearestNode * AlgTraits::nDim_;
-    rhs(nnNdim + 0) += (A_*expfn*oneOverSigma2*(-2*A_*xCoord + 3.*(-(A_*expfn) + u_infty_)*xCoord - 2.*alpha_*omega_*stk::math::cos(omega_*cur_time_)*yrels - (2.*A_*expfn*xCoord*yrels*yrels)*oneOverSigma2 + (2.*(-(A_*expfn) + u_infty_)*xCoord*yrels*yrels)*oneOverSigma2 - mu_*(4.0 - (4.0*xCoord*xCoord)*oneOverSigma2 - (4*yrels*yrels)*oneOverSigma2 - (2*(xCoord + (2*xCoord*yrels*yrels)*oneOverSigma2))/3.)))*scV ;
 
-    rhs(nnNdim + 1) += (A_*expfn*oneOverSigma2*(1.*alpha_*omega_*xCoord*stk::math::cos(omega_*cur_time_) - 2*A_*yrels - 1.*(-(A_*expfn) + u_infty_)*yrels + (2.*(-(A_*expfn) + u_infty_)*xCoord*xCoord*yrels)*oneOverSigma2 - (2.*alpha_*omega_*xCoord*stk::math::cos(omega_*cur_time_)*yrels*yrels)*oneOverSigma2 - (4.*A_*expfn*xCoord*xCoord*yrels*yrels*yrels)*oneOverSigma4 - (alpha_*sigma2*(C_*omega_*stk::math::cos(omega_*cur_time_) + (K_ - M_*omega_*omega_)*stk::math::sin(omega_*cur_time_)))/A_ - mu_*((12.0*xCoord*yrels)*oneOverSigma2 - (4.0*xCoord*xCoord*xCoord*yrels)*oneOverSigma4 - (4.0*xCoord*yrels*yrels*yrels)*oneOverSigma4 - (2.0*(xCoord + (2.0*xCoord*yrels*yrels)*oneOverSigma2))/3.)))*scV;
+    //Static case - No FSI    
+//    rhs(nnNdim + 0) += (expfn*u_infty_*(sigma2*u_infty_*x*(-(expfn*sigma_) + 4.*y) + 4.*mu_*y*(-2.*sigma2 + x*x + y*y))) * oneOverSigma5 * scV ;
 
+//    rhs(nnNdim + 1) += (expfn*u_infty_*(-1.*expfn*sigma2*sigma_*u_infty_*y + 2.*sigma2*u_infty_*(-x*x + y*y) - 4.*mu_*x*(-2.*sigma2 + x*x + y*y))) * oneOverSigma5 * scV;
+
+    //Oscillating case - Still no FSI
+    rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn - 8.*mu_*sigma2*y + 4.*sigma2*u_infty_*x*y + 4.*mu_*x*x*y + 4.*mu_*y*y*y + alpha_*omega_*sigma2*(1.*sigma2 - 2.*y*y)*cosomegat + 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat - 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat + 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(8.*mu_*sigma2 - 4.*sigma2*u_infty_*x - 4.*mu_*x*x - 12.*mu_*y*y - 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
+
+    rhs(nnNdim + 1) += (u_infty_*(8.*mu_*sigma2*x - 2.*sigma2*u_infty_*x*x - 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y - 4.*mu_*x*y*y + 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y + 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ - 4.*mu_*x)*sinomegat * sinomegat - 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
+
+    //Oscillating case - With FSI
+    rhs(nnNdim + 1) += fsiForce * expfn * scV / (sigma_ * sigma_ * M_PI);
+
+//    rhs(nnNdim + 0) += (A_*expfn*oneOverSigma2*(-2*A_*x + 3.*(-(A_*expfn) + u_infty_)*x - 2.*alpha_*omega_*stk::math::cos(omega_*cur_time_)*yrels - (2.*A_*expfn*x*yrels*yrels)*oneOverSigma2 + (2.*(-(A_*expfn) + u_infty_)*x*yrels*yrels)*oneOverSigma2 - mu_*(4.0 - (4.0*x*x)*oneOverSigma2 - (4*yrels*yrels)*oneOverSigma2 - (2*(x + (2*x*yrels*yrels)*oneOverSigma2))/3.)))*scV ;
+
+//    rhs(nnNdim + 1) += (A_*expfn*oneOverSigma2*(1.*alpha_*omega_*x*stk::math::cos(omega_*cur_time_) - 2*A_*yrels - 1.*(-(A_*expfn) + u_infty_)*yrels + (2.*(-(A_*expfn) + u_infty_)*x*x*yrels)*oneOverSigma2 - (2.*alpha_*omega_*x*stk::math::cos(omega_*cur_time_)*yrels*yrels)*oneOverSigma2 - (4.*A_*expfn*x*x*yrels*yrels*yrels)*oneOverSigma4 - mu_*((12.0*x*yrels)*oneOverSigma2 - (4.0*x*x*x*yrels)*oneOverSigma4 - (4.0*x*yrels*yrels*yrels)*oneOverSigma4 - (2.0*(x + (2.0*x*yrels*yrels)*oneOverSigma2))/3.)))*scV;
+    //+ (alpha_*sigma2*(C_*omega_*stk::math::cos(omega_*cur_time_) + (K_ - M_*omega_*omega_)*stk::math::sin(omega_*cur_time_)))/A_ 
   }
 }
 

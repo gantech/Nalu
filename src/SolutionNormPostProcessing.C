@@ -23,6 +23,8 @@
 #include <user_functions/VariableDensityVelocityAuxFunction.h>
 #include <user_functions/VariableDensityNonIsoTemperatureAuxFunction.h>
 #include <user_functions/VariableDensityMixFracAuxFunction.h>
+#include <user_functions/SMDVelocityAuxFunction.h>
+#include <user_functions/SMDPressureAuxFunction.h>
 #include <user_functions/KovasznayVelocityAuxFunction.h>
 #include <user_functions/KovasznayPressureAuxFunction.h>
 
@@ -252,6 +254,15 @@ SolutionNormPostProcessing::analytical_function_factory(
   else if ( functionName == "kovasznay_dpdx" ) {
     theAuxFunc = new KovasznayPressureGradientAuxFunction(0,realm_.meta_data().spatial_dimension());
   }
+  else if ( functionName == "smd_mms_velocity" ) {
+      theAuxFunc = new SMDVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
+  }
+  else if ( functionName == "smd_mms_pressure" ) {
+      theAuxFunc = new SMDPressureAuxFunction();
+  }
+  else if ( functionName == "smd_mms_dpdx" ) {
+      theAuxFunc = new SMDPressureGradientAuxFunction(0,realm_.meta_data().spatial_dimension());
+  }  
   else if ( functionName == "convecting_taylor_vortex" ) {
     theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
   }

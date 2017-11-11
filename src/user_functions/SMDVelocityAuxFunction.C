@@ -22,7 +22,6 @@ SMDVelocityAuxFunction::SMDVelocityAuxFunction(
   const unsigned endPos) :
   AuxFunction(beginPos, endPos),
     u_infty_(2.0),
-    A_(1.0),
     sigma_(0.5),
     alpha_(1.0),
     omega_(1.0)
@@ -49,8 +48,8 @@ SMDVelocityAuxFunction::do_evaluate(
     const double x = coords[0];
     const double y = coords[1];
 
-    fieldPtr[0] = u_infty_ - A_*std::exp( - (x*x + (y-ys)*(y-ys))/(sigma_ * sigma_) );
-    fieldPtr[1] = -A_*oneOverSigma2 * x * (y-ys) * std::exp( - (x*x + (y-ys)*(y-ys))*oneOverSigma2 );
+    fieldPtr[0] = u_infty_ * (1.0 - (y-ys)/sigma_ * std::exp( - (x*x + (y-ys)*(y-ys))/(sigma_ * sigma_) ) );
+    fieldPtr[1] = u_infty_ * (x/sigma_)  * std::exp( - (x*x + (y-ys)*(y-ys))*oneOverSigma2 );
 
     fieldPtr += fieldSize;
     coords += spatialDimension;

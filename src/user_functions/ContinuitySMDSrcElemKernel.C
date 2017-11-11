@@ -71,7 +71,7 @@ ContinuitySMDSrcElemKernel<AlgTraits>::execute(
 
   // Forcing nDim = 3 instead of using AlgTraits::nDim_ here to avoid compiler
   // warnings when this template is instantiated for 2-D topologies.
-  DoubleType w_scvCoords[3] KOKKOS_ALIGN(64);
+  DoubleType NALU_ALIGN(64) w_scvCoords[3];
 
   SharedMemView<DoubleType**>& v_coordinates = scratchViews.get_scratch_view_2D(*coordinates_);
   SharedMemView<DoubleType*>& v_scv_volume = scratchViews.get_me_views(CURRENT_COORDINATES).scv_volume;
@@ -98,7 +98,7 @@ ContinuitySMDSrcElemKernel<AlgTraits>::execute(
     DoubleType xCoord = w_scvCoords[0];
     DoubleType yCoord = w_scvCoords[1];
 
-    DoubleType yrels = yCoord - alpha_ * stk::math::sin(omega_ * cur_time_);
+    DoubleType yrels = yCoord ;//- alpha_ * stk::math::sin(omega_ * cur_time_);
     DoubleType expfn = stk::math::exp(-(xCoord*xCoord + yrels*yrels)*oneOverSigma2);
 
     rhs(nearestNode) += A_*expfn*xCoord*oneOverSigma2*(1 + (2.0*yrels*yrels)*oneOverSigma2)*v_scv_volume(ip);

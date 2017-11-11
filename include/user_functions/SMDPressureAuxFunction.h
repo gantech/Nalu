@@ -34,10 +34,36 @@ public:
     const unsigned endPos) const;
 
 private:
-  const double A_;
+  const double u_infty_;
   const double sigma_;
   const double alpha_;
   const double omega_;
+};
+
+class SMDPressureGradientAuxFunction : public AuxFunction
+{
+public:
+
+    SMDPressureGradientAuxFunction(const unsigned beginPos,
+                                  const unsigned endPos);
+
+    virtual ~SMDPressureGradientAuxFunction() {}
+
+    virtual void do_evaluate(
+        const double * coords,
+        const double time,
+        const unsigned spatialDimension,
+        const unsigned numPoints,
+        double * fieldPtr,
+        const unsigned fieldSize,
+        const unsigned beginPos,
+        const unsigned endPos) const;
+
+private:
+    const double u_infty_;
+    const double sigma_;
+    const double alpha_;
+    const double omega_;
 };
 
 } // namespace nalu

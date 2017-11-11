@@ -37,7 +37,6 @@ public:
 
 private:
   const double u_infty_;
-  const double A_;
   const double sigma_;
   const double alpha_;
   const double omega_;
