@@ -60,7 +60,7 @@ class ActuatorLineSMDPointInfo {
   stk::mesh::Entity bestElem_; ///< The element within which the actuator point lies.
 
   std::vector<double> isoParCoords_; ///< The isoparametric coordinates of the bestElem_.
-  std::vector<stk::mesh::Entity> elementVec_; ///< A list of elements that lie within the searchRadius_ around the actuator point.
+  std::set<stk::mesh::Entity> nodeVec_; ///< A list of elements that lie within the searchRadius_ around the actuator point.
 };
 
 /** The ActuatorLineSMD class couples Nalu with the third party library SMD for actuator line simulations of a spring-mass-damper system
@@ -211,11 +211,11 @@ class ActuatorLineSMD: public Actuator {
 
   // compute the body force at an element given a
   // projection weighting.
-  void compute_elem_force_given_weight(
+  void compute_node_force_given_weight(
     const int &nDim,
     const double &g,
     const double *pointForce,
-    double *elemForce);
+    double *nodeForce);
 
   // isotropic Gaussian projection function.
   double isotropic_Gaussian_projection(
@@ -225,19 +225,16 @@ class ActuatorLineSMD: public Actuator {
 
   // finally, perform the assembly
 
-  void assemble_source_to_nodes(
+  void spread_actuator_force_to_node_vec(
     const int &nDim,
-    stk::mesh::Entity elem,
-    const stk::mesh::BulkData & bulkData,
-    const double &elemVolume,
-    const std::vector<double> & elemForce,
-    const double &gLocal,
-    stk::mesh::FieldBase & elemCoords,
-    stk::mesh::FieldBase &actuator_source,
-    stk::mesh::FieldBase &g,
-    stk::mesh::FieldBase &dualNodalVolume,
-    std::vector<double>& forceSum);
-
+    std::set<stk::mesh::Entity>& nodeVec,
+    const std::vector<double>& actuator_force,
+    const double * actuator_node_coordinates,
+    const stk::mesh::FieldBase & coordinates,
+    stk::mesh::FieldBase & actuator_source,
+    const stk::mesh::FieldBase & dual_nodal_volume,
+    const Coordinates & epsilon);
+      
   Realm &realm_; ///< hold the realm
 
   stk::search::SearchMethod searchMethod_; ///< type of stk search

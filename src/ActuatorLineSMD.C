@@ -118,15 +118,15 @@ ActuatorLineSMD::~ActuatorLineSMD()
 
 // Multiply the point force by the weight at this element location.
 void
-ActuatorLineSMD::compute_elem_force_given_weight(
+ActuatorLineSMD::compute_node_force_given_weight(
   const int &nDim,
   const double &g,
   const double *pointForce,
-  double *elemForce)
+  double *nodeForce)
 {
 
   for ( int j = 0; j < nDim; ++j )
-    elemForce[j] = pointForce[j]*g;
+    nodeForce[j] = pointForce[j]*g;
 }
 
 /**
@@ -256,7 +256,6 @@ ActuatorLineSMD::initialize()
   allocateSMDToProc();
 
   p_smd.init() ;
-
   update(); // Update location of actuator points, ghosting etc.
 }
 
@@ -414,12 +413,31 @@ ActuatorLineSMD::execute()
     resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
     //    resize_std_vector(1, ws_viscosity_, bestElem, bulkData);
     resize_std_vector(1, ws_density_, bestElem, bulkData);
-
+    
     // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
     gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem),
                  nodesPerElement);
+
+    NaluEnv::self().naluOutput() << "Best element co-ordinates " << std::endl;
+    NaluEnv::self().naluOutput() << ws_coordinates_[0] << " " << ws_coordinates_[1] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_coordinates_[2] << " " << ws_coordinates_[3] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_coordinates_[4] << " " << ws_coordinates_[5] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_coordinates_[6] << " " << ws_coordinates_[7] << std::endl ;
+
+    NaluEnv::self().naluOutput() << "BestX" << infoObject->bestX_ << std::endl ;
+    
     gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem),
                             nodesPerElement);
+    
+    NaluEnv::self().naluOutput() << "Best element velocities " << std::endl;
+    NaluEnv::self().naluOutput() << ws_velocity_[0] << " " << ws_velocity_[1] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_velocity_[2] << " " << ws_velocity_[3] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_velocity_[4] << " " << ws_velocity_[5] << std::endl ;
+    NaluEnv::self().naluOutput() << ws_velocity_[6] << " " << ws_velocity_[7] << std::endl ;
+
+    NaluEnv::self().naluOutput() << "IsoParCoords" << std::endl ;
+    NaluEnv::self().naluOutput() << infoObject->isoParCoords_[0] << " " << infoObject->isoParCoords_[1] << " " << infoObject->isoParCoords_[2] << " " << infoObject->isoParCoords_[3] << std::endl ;
+    
     //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem),
     //                            nodesPerElement);
     gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem),
@@ -437,6 +455,8 @@ ActuatorLineSMD::execute()
     interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(),
                       &ws_density_[0], &ws_pointGasDensity);
 
+    NaluEnv::self().naluOutput() << "Velocity at point " << ws_pointGasVelocity[0] << " " << ws_pointGasVelocity[1] << std::endl;
+    
     p_smd.setVelocity_n(ws_pointGasVelocity, np, infoObject->globSMDId_);
     np = np + 1;
 
@@ -446,6 +466,10 @@ ActuatorLineSMD::execute()
 
   if ( ! p_smd.isDryRun() ) {
 
+    if ( p_smd.isTimeZero() ) {
+        p_smd.solution0();
+    }
+      
     //Step SMD
     for(int j=0; j < tStepRatio_; j++) p_smd.step();
   }
@@ -469,53 +493,19 @@ ActuatorLineSMD::execute()
     int nodesPerElement = bulkData.num_nodes(bestElem);
 
     p_smd.getForce_np1(ws_pointForce, np, infoObject->globSMDId_);
+    NaluEnv::self().naluOutput() << "Force is  " << ws_pointForce[1] << std::endl ;      
 
     int iTurbGlob = infoObject->globSMDId_;
-
-    // get the vector of elements
-    std::vector<stk::mesh::Entity> elementVec = infoObject->elementVec_;
 
     // Set up the necessary variables to check that forces/projection function are integrating up correctly.
     double gSum = 0.0;
     std::vector<double> forceSum(nDim);
     for(int j=0; j < nDim; j++) forceSum[j] = 0.0;
 
-    // iterate them and apply source term; gather coords
-    for ( size_t k = 0; k < elementVec.size(); ++k ) {
+    // get the vector of elements
+    std::set<stk::mesh::Entity> nodeVec = infoObject->nodeVec_;
 
-      stk::mesh::Entity elem = elementVec[k];
-
-      nodesPerElement = bulkData.num_nodes(elem);
-
-      // resize some work vectors
-      resize_std_vector(nDim, ws_coordinates_, elem, bulkData);
-
-      // gather coordinates
-      gather_field_inverted_order(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(elem),
-                   nodesPerElement);
-
-      // compute volume
-      double elemVolume = compute_volume(nDim, elem, bulkData);
-
-      // determine element centroid
-      compute_elem_centroid(nDim, &ws_elemCentroid[0], nodesPerElement);
-
-      // compute distance
-      const double distance = compute_distance(nDim, &ws_elemCentroid[0], &(infoObject->centroidCoords_[0]));
-
-      double gA = 0.0;
-
-      // project the force to this element centroid with projection function
-      gA = isotropic_Gaussian_projection(nDim, distance, infoObject->epsilon_);
-      compute_elem_force_given_weight(nDim, gA, &ws_pointForce[0], &ws_elemForce[0]);
-      // assemble nodal quantity; no LHS contribution here...
-      assemble_source_to_nodes(nDim, elem, bulkData, elemVolume, ws_elemForce,
-                               gA, *coordinates, *actuator_source, *g, *dualNodalVolume,
-                               forceSum);
-//      for(int j=0; j < nDim; j++) forceSum[j] += ws_elemForce[j]*elemVolume;
-      gSum += gA*elemVolume;
-
-    }
+    spread_actuator_force_to_node_vec(nDim, nodeVec, ws_pointForce, &(infoObject->centroidCoords_[0]), *coordinates, *actuator_source, *dualNodalVolume, infoObject->epsilon_);
 
     np=np+1;
   }
@@ -523,9 +513,6 @@ ActuatorLineSMD::execute()
   // parallel assemble (contributions from ghosted and locally owned)
   const std::vector<const stk::mesh::FieldBase*> sumFieldVec(1, actuator_source);
   stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldVec);
-
-  const std::vector<const stk::mesh::FieldBase*> sumFieldG(1, g);
-  stk::mesh::parallel_sum_including_ghosts(bulkData, sumFieldG);
 
 }
 
@@ -757,7 +744,7 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
 	  // move the coordinates
 	  p_smd.getCoordinates_np1(currentCoords, 0, 0);
 
-          double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
+          double searchRadius = actuatorLineInfo->epsilon_.x_ * 2000.0;
 
 	  for ( int j = 0; j < nDim; ++j )
 	    centroidCoords[j] = currentCoords[j];
@@ -863,7 +850,7 @@ ActuatorLineSMD::complete_search()
 
       // gather elemental coords
       std::vector<double> elementCoords(nDim*nodesPerElement);
-      gather_field(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem),
+      gather_field_for_interp(nDim, &elementCoords[0], *coordinates, bulkData.begin_nodes(elem),
                    nodesPerElement);
 
 
@@ -880,7 +867,14 @@ ActuatorLineSMD::complete_search()
         actuatorLinePointInfo->isoParCoords_ = isoParCoords;
         actuatorLinePointInfo->bestElem_ = elem;
       }
-        actuatorLinePointInfo->elementVec_.push_back(elem);
+
+        // extract elem_node_relations
+        stk::mesh::Entity const* elem_node_rels = bulkData.begin_nodes(elem);
+        const unsigned num_nodes = bulkData.num_nodes(elem);
+        for (unsigned inode = 0; inode < num_nodes; inode++) {
+            stk::mesh::Entity node = elem_node_rels[inode];
+            actuatorLinePointInfo->nodeVec_.insert(node);
+        }
     }
     else {
       // not this proc's issue
@@ -922,33 +916,11 @@ ActuatorLineSMD::gather_field(
     stk::mesh::Entity node = elem_node_rels[ni];
     const double * theField = (double*)stk::mesh::field_data(stkField, node );
     for ( int j = 0; j < sizeOfField; ++j ) {
-      const int offSet = j*nodesPerElement+ni;
+      const int offSet = ni*sizeOfField+j;
       fieldToFill[offSet] = theField[j];
     }
   }
 }
-
-//--------------------------------------------------------------------------
-//-------- gather_field ----------------------------------------------------
-//--------------------------------------------------------------------------
-void
-ActuatorLineSMD::gather_field_inverted_order(
-    const int &sizeOfField,
-    double *fieldToFill,
-    const stk::mesh::FieldBase &stkField,
-    stk::mesh::Entity const* elem_node_rels,
-    const int &nodesPerElement)
-{
-    for ( int ni = 0; ni < nodesPerElement; ++ni ) {
-        stk::mesh::Entity node = elem_node_rels[ni];
-        const double * theField = (double*)stk::mesh::field_data(stkField, node );
-        for ( int j = 0; j < sizeOfField; ++j ) {
-            const int offSet = ni*sizeOfField+j;
-            fieldToFill[offSet] = theField[j];
-        }
-    }
-}
-
 
 //--------------------------------------------------------------------------
 //-------- gather_field_for_interp -----------------------------------------
@@ -1063,56 +1035,38 @@ ActuatorLineSMD::compute_distance(
 }
 
 
-//--------------------------------------------------------------------------
-//-------- assemble_source_to_nodes ----------------------------------------
-//--------------------------------------------------------------------------
+// Spread actuator force to nodes
 void
-ActuatorLineSMD::assemble_source_to_nodes(
+ActuatorLineSMD::spread_actuator_force_to_node_vec(
   const int &nDim,
-  stk::mesh::Entity elem,
-  const stk::mesh::BulkData & bulkData,
-  const double &elemVolume,
-  const std::vector<double> & elemForce,
-  const double &gLocal,
-  stk::mesh::FieldBase & elemCoords,
+  std::set<stk::mesh::Entity>& nodeVec,
+  const std::vector<double>& actuator_force,
+  const double * actuator_node_coordinates,
+  const stk::mesh::FieldBase & coordinates,
   stk::mesh::FieldBase & actuator_source,
-  stk::mesh::FieldBase & g,
-  stk::mesh::FieldBase & dualNodalVolume,
-  std::vector<double>& forceSum
+  const stk::mesh::FieldBase & dual_nodal_volume,
+  const Coordinates & epsilon
 )
 {
-  // extract master element from the bucket in which the element resides
-  const stk::topology &elemTopo = bulkData.bucket(elem).topology();
-  MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(elemTopo);
-  const int numScvIp = meSCV->numIntPoints_;
+    std::vector<double> ws_nodeForce(nDim);
 
-  // extract elem_node_relations
-  stk::mesh::Entity const* elem_node_rels = bulkData.begin_nodes(elem);
+    std::set<stk::mesh::Entity>::iterator iNode;
+    for (iNode = nodeVec.begin(); iNode != nodeVec.end(); ++iNode ) {
 
-  // assemble to nodes
-  const int *ipNodeMap = meSCV->ipNodeMap();
-  for ( int ip = 0; ip < numScvIp; ++ip ) {
+      stk::mesh::Entity node = *iNode;
+      const double * node_coords = (double*)stk::mesh::field_data(coordinates, node );
+      const double * dVol = (double*)stk::mesh::field_data(dual_nodal_volume, node );
+      // compute distance
+      const double distance = compute_distance(nDim, node_coords, actuator_node_coordinates);
+      // project the force to this node with projection function
+      double gA = isotropic_Gaussian_projection(nDim, distance, epsilon);
+      compute_node_force_given_weight(nDim, gA, &actuator_force[0], &ws_nodeForce[0]);
+      double * sourceTerm = (double*)stk::mesh::field_data(actuator_source, node );
+      for ( int j=0; j < nDim; ++j ) sourceTerm[j] += ws_nodeForce[j];
 
-    // nearest node to ip
-    const int nearestNode = ipNodeMap[ip];
-
-    // extract node and pointer to source term
-    stk::mesh::Entity node = elem_node_rels[nearestNode];
-    double * sourceTerm = (double*)stk::mesh::field_data(actuator_source, node );
-    double * dVol = (double *)stk::mesh::field_data(dualNodalVolume, node);
-    double * gGlobal = (double*)stk::mesh::field_data(g, node);
-
-    // nodal weight based on volume weight
-    const double nodalWeight = ws_scv_volume_[ip]/elemVolume;
-    *gGlobal += gLocal;
-    for ( int j=0; j < nDim; ++j ) {
-      sourceTerm[j] += nodalWeight * elemForce[j];
-      forceSum[j] += nodalWeight * elemForce[j] * (*dVol);
     }
 
-  }
 }
-
 
 } // namespace nalu
 } // namespace Sierra
