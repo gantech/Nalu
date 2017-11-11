@@ -56,6 +56,11 @@
 
 // overset
 #include <overset/OversetManager.h>
+#include <overset/OversetManagerSTK.h>
+
+#ifdef NALU_USES_TIOGA
+#include <overset/OversetManagerTIOGA.h>
+#endif
 
 // post processing
 #include <SolutionNormPostProcessing.h>
@@ -967,6 +972,9 @@ Realm::setup_bc()
         throw std::runtime_error("unknown bc");
     }
   }
+
+  if (hasOverset_)
+    oversetManager_->setup();
 }
 
 //--------------------------------------------------------------------------
@@ -2423,7 +2431,7 @@ Realm::get_coordinates_name()
 //-------- has_mesh_motion -------------------------------------------------
 //--------------------------------------------------------------------------
 bool
-Realm::has_mesh_motion()
+Realm::has_mesh_motion() const
 {
   return solutionOptions_->meshMotion_;
 }
@@ -2432,7 +2440,7 @@ Realm::has_mesh_motion()
 //-------- has_mesh_deformation --------------------------------------------
 //--------------------------------------------------------------------------
 bool
-Realm::has_mesh_deformation()
+Realm::has_mesh_deformation() const
 {
   return solutionOptions_->externalMeshDeformation_ | solutionOptions_->meshDeformation_;
 }
@@ -2441,7 +2449,7 @@ Realm::has_mesh_deformation()
 //-------- does_mesh_move --------------------------------------------------
 //--------------------------------------------------------------------------
 bool
-Realm::does_mesh_move()
+Realm::does_mesh_move() const
 {
   return has_mesh_motion() | has_mesh_deformation();
 }
@@ -2450,7 +2458,7 @@ Realm::does_mesh_move()
 //-------- has_non_matching_boundary_face_alg ------------------------------
 //--------------------------------------------------------------------------
 bool
-Realm::has_non_matching_boundary_face_alg()
+Realm::has_non_matching_boundary_face_alg() const
 {
   return hasNonConformal_ | hasOverset_;
 }
@@ -3278,8 +3286,32 @@ Realm::setup_overset_bc(
 
   // create manager while providing overset data
   if ( NULL == oversetManager_ ) {
-    oversetManager_ = new OversetManager(*this,oversetBCData.userData_);
-  }
+    switch (oversetBCData.oversetConnectivityType_) {
+    case OversetBoundaryConditionData::NALU_STK:
+      NaluEnv::self().naluOutputP0()
+        << "Realm::setup_overset_bc:: Selecting STK-based overset connectivity algorithm"
+        << std::endl;
+      oversetManager_ = new OversetManagerSTK(*this, oversetBCData.userData_);
+      break;
+
+    case OversetBoundaryConditionData::TPL_TIOGA:
+#ifdef NALU_USES_TIOGA
+      oversetManager_ = new OversetManagerTIOGA(*this, oversetBCData.userData_);
+      NaluEnv::self().naluOutputP0()
+        << "Realm::setup_overset_bc:: Selecting TIOGA TPL for overset connectivity"
+        << std::endl;
+#else
+      // should not get here... we should have thrown error in input file processing stage
+      throw std::runtime_error("TIOGA TPL support not enabled during compilation phase");
+#endif
+      break;
+
+    case OversetBoundaryConditionData::OVERSET_NONE:
+    default:
+      throw std::runtime_error("Invalid setting for overset connectivity");
+      break;
+    }
+  }   
 }
 
 //--------------------------------------------------------------------------
@@ -4764,11 +4796,23 @@ Realm::bulk_data()
   return *bulkData_;
 }
 
+const stk::mesh::BulkData &
+Realm::bulk_data() const
+{
+  return *bulkData_;
+}
+
 //--------------------------------------------------------------------------
 //-------- meta_data() -----------------------------------------------------
 //--------------------------------------------------------------------------
 stk::mesh::MetaData &
 Realm::meta_data()
+{
+  return *metaData_;
+}
+
+const stk::mesh::MetaData &
+Realm::meta_data() const
 {
   return *metaData_;
 }
@@ -4789,11 +4833,11 @@ stk::mesh::Selector
 Realm::get_inactive_selector()
 {
   // accumulate inactive parts relative to the universal part
-
+ 
   // provide inactive Overset part that excludes background surface
-  stk::mesh::Selector inactiveOverSetSelector = (hasOverset_)
-    ? (stk::mesh::Selector(*oversetManager_->inActivePart_)
-       &!(stk::mesh::selectUnion(oversetManager_->orphanPointSurfaceVecBackground_)))
+  stk::mesh::Selector inactiveOverSetSelector =
+    (hasOverset_) ? oversetManager_->get_inactive_selector()
+>>>>>>> actLineHO
     : stk::mesh::Selector();
 
   // provide inactive dataProbe parts
