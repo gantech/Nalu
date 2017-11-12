@@ -392,6 +392,24 @@ ActuatorLinePointDrag::initialize()
   complete_search();
 }
 
+// predict the state of the structural model at the next time step
+void ActuatorLinePointDrag::predict_struct_time_step() {
+
+    // Nothing to do here
+}
+
+// firmly advance the state of the structural model to the next time step
+void ActuatorLinePointDrag::advance_struct_time_step() {
+
+    // Nothing to do here
+}
+  
+// sample velocity at the actuator points and send to the structural model
+void ActuatorLinePointDrag::sample_vel() {
+
+    // Nothing to do here
+}
+
 //--------------------------------------------------------------------------
 //-------- execute ---------------------------------------------------------
 //--------------------------------------------------------------------------
