@@ -426,6 +426,15 @@ ActuatorLineFAST::update()
 
 }
 
+// predict the state of the structural model at the next time step
+void ActuatorLineFAST::predict_struct_time_step();
+
+// firmly advance the state of the structural model to the next time step
+void ActuatorLineFAST::advance_struct_time_step();
+  
+// sample velocity at the actuator points and send to the structural model
+void ActuatorLineFAST::sample_vel();
+
 
 /** This function is called at each time step. This samples the velocity at each actuator point,
  *  advances the OpenFAST turbine models to Nalu's next time step and assembles the source terms

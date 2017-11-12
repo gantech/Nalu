@@ -254,8 +254,12 @@ ActuatorLineSMD::initialize()
 {
 
   allocateSMDToProc();
-
   p_smd.init() ;
+  std::vector<double> ws_pointGasVelocity(2);
+  ws_pointGasVelocity[0] = 2.0; ws_pointGasVelocity[1] = 0.0; 
+  p_smd.setVelocity_n(ws_pointGasVelocity, 0, 0);
+  p_smd.solution0();
+  
   update(); // Update location of actuator points, ghosting etc.
 }
 
@@ -319,14 +323,21 @@ ActuatorLineSMD::update()
 
 }
 
+void ActuatorLineSMD:: predict_struct_time_step() {
 
-/** This function is called at each time step. This samples the velocity at each actuator point,
- *  advances the OpenFAST turbine models to Nalu's next time step and assembles the source terms
- *  in the momentum equation for Nalu.
-*/
-void
-ActuatorLineSMD::execute()
-{
+    if ( ! p_smd.isDryRun() )
+        p_smd.step();
+        
+}
+
+void ActuatorLineSMD:: advance_struct_time_step() {
+
+    if ( ! p_smd.isDryRun() )
+        p_smd.advanceStates();
+}
+
+void ActuatorLineSMD::sample_vel() {
+
   // meta/bulk data and nDim
   stk::mesh::MetaData & metaData = realm_.meta_data();
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
@@ -346,39 +357,13 @@ ActuatorLineSMD::execute()
     = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   ScalarFieldType *dualNodalVolume
     = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
-  // deal with proper viscosity
-  //  const std::string viscName = realm_.is_turbulent() ? "effective_viscosity" : "viscosity";
-  //  ScalarFieldType *viscosity
-  //    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName);
-
+  
   // fixed size scratch
   std::vector<double> ws_pointGasVelocity(nDim);
   std::vector<double> ws_elemCentroid(nDim);
   std::vector<double> ws_pointForce(nDim);
   std::vector<double> ws_elemForce(nDim);
   double ws_pointGasDensity;
-  //  double ws_pointGasViscosity;
-
-  // zero out source term; do this manually since there are custom ghosted entities
-  stk::mesh::Selector s_nodes = stk::mesh::selectField(*actuator_source);
-  stk::mesh::BucketVector const& node_buckets =
-    realm_.get_buckets( stk::topology::NODE_RANK, s_nodes );
-  for ( stk::mesh::BucketVector::const_iterator ib = node_buckets.begin() ;
-        ib != node_buckets.end() ; ++ib ) {
-    stk::mesh::Bucket & b = **ib ;
-    const stk::mesh::Bucket::size_type length   = b.size();
-    double * actSrc = stk::mesh::field_data(*actuator_source, b);
-    double * actSrcLhs = stk::mesh::field_data(*actuator_source_lhs, b);
-    double * gF = stk::mesh::field_data(*g, b);
-    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
-      actSrcLhs[k] = 0.0;
-      gF[k] = 0.0;
-      const int offSet = k*3;
-      for ( int j = 0; j < nDim; ++j ) {
-        actSrc[offSet+j] = 0.0;
-      }
-    }
-  }
 
   // parallel communicate data to the ghosted elements; again can communicate points to element ranks
   if ( NULL != actuatorLineGhosting_ ) {
@@ -438,8 +423,6 @@ ActuatorLineSMD::execute()
     NaluEnv::self().naluOutput() << "IsoParCoords" << std::endl ;
     NaluEnv::self().naluOutput() << infoObject->isoParCoords_[0] << " " << infoObject->isoParCoords_[1] << " " << infoObject->isoParCoords_[2] << " " << infoObject->isoParCoords_[3] << std::endl ;
     
-    //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem),
-    //                            nodesPerElement);
     gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem),
                             nodesPerElement);
 
@@ -447,37 +430,95 @@ ActuatorLineSMD::execute()
     interpolate_field(nDim, bestElem, bulkData, infoObject->isoParCoords_.data(),
                       &ws_velocity_[0], ws_pointGasVelocity.data());
 
-    // interpolate viscosity
-    //    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]),
-    //                      &ws_viscosity_[0], &ws_pointGasViscosity);
-
     // interpolate density
     interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(),
                       &ws_density_[0], &ws_pointGasDensity);
 
-    NaluEnv::self().naluOutput() << "Velocity at point " << ws_pointGasVelocity[0] << " " << ws_pointGasVelocity[1] << std::endl;
-    
-    p_smd.setVelocity_n(ws_pointGasVelocity, np, infoObject->globSMDId_);
+    NaluEnv::self().naluOutput() << "Velocity at point " << ws_pointGasVelocity[0] << ", " << ws_pointGasVelocity[1] << std::endl;
+        
+    p_smd.setVelocity_np1(ws_pointGasVelocity, np, infoObject->globSMDId_);
     np = np + 1;
 
   }
+    
+}
 
 
+/** This function is called at each time step. This assembles the source terms
+ *  in the momentum equation for Nalu.
+*/
+void
+ActuatorLineSMD::execute()
+{
 
-  if ( ! p_smd.isDryRun() ) {
+  p_smd.extrapolateStatesVel(); //Predict the velocity and states at time step 'n+1'
+  
+  update(); //Move the actuator point to the predicted location and do search, ghosting etc. 
 
-    if ( p_smd.isTimeZero() ) {
-        p_smd.solution0();
+  //Now get the force and spread to the nodes and assemble source term
+  
+  // meta/bulk data and nDim
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+  stk::mesh::BulkData & bulkData = realm_.bulk_data();
+  const int nDim = metaData.spatial_dimension();
+
+  // extract fields
+  VectorFieldType *coordinates
+    = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  VectorFieldType *actuator_source
+    = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "actuator_source");
+  ScalarFieldType *actuator_source_lhs
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "actuator_source_lhs");
+  ScalarFieldType *g
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "g");
+  ScalarFieldType *density
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
+  ScalarFieldType *dualNodalVolume
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
+
+  // fixed size scratch
+  std::vector<double> ws_pointGasVelocity(nDim);
+  std::vector<double> ws_elemCentroid(nDim);
+  std::vector<double> ws_pointForce(nDim);
+  std::vector<double> ws_elemForce(nDim);
+  double ws_pointGasDensity;
+
+  // zero out source term; do this manually since there are custom ghosted entities
+  stk::mesh::Selector s_nodes = stk::mesh::selectField(*actuator_source);
+  stk::mesh::BucketVector const& node_buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, s_nodes );
+  for ( stk::mesh::BucketVector::const_iterator ib = node_buckets.begin() ;
+        ib != node_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * actSrc = stk::mesh::field_data(*actuator_source, b);
+    double * actSrcLhs = stk::mesh::field_data(*actuator_source_lhs, b);
+    double * gF = stk::mesh::field_data(*g, b);
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      actSrcLhs[k] = 0.0;
+      gF[k] = 0.0;
+      const int offSet = k*3;
+      for ( int j = 0; j < nDim; ++j ) {
+        actSrc[offSet+j] = 0.0;
+      }
     }
-      
-    //Step SMD
-    for(int j=0; j < tStepRatio_; j++) p_smd.step();
   }
 
-  update();
+  // parallel communicate data to the ghosted elements; again can communicate points to element ranks
+  if ( NULL != actuatorLineGhosting_ ) {
+    std::vector< const stk::mesh::FieldBase *> ghostFieldVec;
+    // fields that are needed
+    ghostFieldVec.push_back(coordinates);
+    ghostFieldVec.push_back(velocity);
+    ghostFieldVec.push_back(dualNodalVolume);
+    //    ghostFieldVec.push_back(viscosity);
+    stk::mesh::communicate_field_data(*actuatorLineGhosting_, ghostFieldVec);
+  }
 
   // loop over map and assemble source terms
-  np = 0;
+  std::map<size_t, ActuatorLineSMDPointInfo *>::iterator iterPoint;
+  int np=0;
   for (iterPoint  = actuatorLinePointInfoMap_.begin();
        iterPoint != actuatorLinePointInfoMap_.end();
        ++iterPoint) {
@@ -493,8 +534,10 @@ ActuatorLineSMD::execute()
     int nodesPerElement = bulkData.num_nodes(bestElem);
 
     p_smd.getForce_np1(ws_pointForce, np, infoObject->globSMDId_);
-    NaluEnv::self().naluOutput() << "Force is  " << ws_pointForce[1] << std::endl ;      
-
+    NaluEnv::self().naluOutput() << "Predicte force at n+1 is  " << ws_pointForce[1] << std::endl ;
+    double actualForce = - (std::cos(realm_.get_current_time()) + (10.0 - 1.0)*std::sin(realm_.get_current_time())) ;
+    NaluEnv::self().naluOutput() << "Actual force at n+1 is supposed to be " << actualForce << std::endl ;
+                            
     int iTurbGlob = infoObject->globSMDId_;
 
     // Set up the necessary variables to check that forces/projection function are integrating up correctly.
@@ -743,7 +786,10 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
 	  // set model coordinates from SMD
 	  // move the coordinates
 	  p_smd.getCoordinates_np1(currentCoords, 0, 0);
-
+          NaluEnv::self().naluOutput() << "Predicted location at n+1 is  " << currentCoords[1] << std::endl ;
+          double actCoord = std::sin(realm_.get_current_time());
+          NaluEnv::self().naluOutput() << "Actual location at n+1 is supposed to be " << actCoord << std::endl ;
+          
           double searchRadius = actuatorLineInfo->epsilon_.x_ * 2000.0;
 
 	  for ( int j = 0; j < nDim; ++j )

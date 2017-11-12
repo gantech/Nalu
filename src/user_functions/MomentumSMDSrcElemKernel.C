@@ -127,14 +127,20 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
 
 //    rhs(nnNdim + 1) += (expfn*u_infty_*(-1.*expfn*sigma2*sigma_*u_infty_*y + 2.*sigma2*u_infty_*(-x*x + y*y) - 4.*mu_*x*(-2.*sigma2 + x*x + y*y))) * oneOverSigma5 * scV;
 
-    //Oscillating case - Still no FSI
-    rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn - 8.*mu_*sigma2*y + 4.*sigma2*u_infty_*x*y + 4.*mu_*x*x*y + 4.*mu_*y*y*y + alpha_*omega_*sigma2*(1.*sigma2 - 2.*y*y)*cosomegat + 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat - 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat + 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(8.*mu_*sigma2 - 4.*sigma2*u_infty_*x - 4.*mu_*x*x - 12.*mu_*y*y - 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
+    //Oscillating case - Still no FSI - What worked earlier
+//    rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn - 8.*mu_*sigma2*y + 4.*sigma2*u_infty_*x*y + 4.*mu_*x*x*y + 4.*mu_*y*y*y + alpha_*omega_*sigma2*(1.*sigma2 - 2.*y*y)*cosomegat + 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat - 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat + 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(8.*mu_*sigma2 - 4.*sigma2*u_infty_*x - 4.*mu_*x*x - 12.*mu_*y*y - 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
 
-    rhs(nnNdim + 1) += (u_infty_*(8.*mu_*sigma2*x - 2.*sigma2*u_infty_*x*x - 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y - 4.*mu_*x*y*y + 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y + 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ - 4.*mu_*x)*sinomegat * sinomegat - 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
+//    rhs(nnNdim + 1) += (u_infty_*(8.*mu_*sigma2*x - 2.*sigma2*u_infty_*x*x - 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y - 4.*mu_*x*y*y + 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y + 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ - 4.*mu_*x)*sinomegat * sinomegat - 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
+
+    //Oscillating case - Still no FSI - Flipped vorticity
+    rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn + 8.*mu_*sigma2*y - 4.*mu_*x*x*y - 4.*mu_*y*y*y + alpha_*omega_*sigma2*(-1.*sigma2 + 2.*y*y)*cosomegat - 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat + 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat - 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(-8.*mu_*sigma2 + 4.*mu_*x*x + 12.*mu_*y*y + 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
+
+    rhs(nnNdim + 1) += (u_infty_*(-2.*sigma2*sigma2*u_infty_ - 8.*mu_*sigma2*x + 2.*sigma2*u_infty_*x*x + 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y + 4.*mu_*x*y*y - 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y - 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ + 4.*mu_*x)*sinomegat * sinomegat + 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
 
     //Oscillating case - With FSI
     rhs(nnNdim + 1) += fsiForce * expfn * scV / (sigma_ * sigma_ * M_PI);
 
+    //Didn't work
 //    rhs(nnNdim + 0) += (A_*expfn*oneOverSigma2*(-2*A_*x + 3.*(-(A_*expfn) + u_infty_)*x - 2.*alpha_*omega_*stk::math::cos(omega_*cur_time_)*yrels - (2.*A_*expfn*x*yrels*yrels)*oneOverSigma2 + (2.*(-(A_*expfn) + u_infty_)*x*yrels*yrels)*oneOverSigma2 - mu_*(4.0 - (4.0*x*x)*oneOverSigma2 - (4*yrels*yrels)*oneOverSigma2 - (2*(x + (2*x*yrels*yrels)*oneOverSigma2))/3.)))*scV ;
 
 //    rhs(nnNdim + 1) += (A_*expfn*oneOverSigma2*(1.*alpha_*omega_*x*stk::math::cos(omega_*cur_time_) - 2*A_*yrels - 1.*(-(A_*expfn) + u_infty_)*yrels + (2.*(-(A_*expfn) + u_infty_)*x*x*yrels)*oneOverSigma2 - (2.*alpha_*omega_*x*stk::math::cos(omega_*cur_time_)*yrels*yrels)*oneOverSigma2 - (4.*A_*expfn*x*x*yrels*yrels*yrels)*oneOverSigma4 - mu_*((12.0*x*yrels)*oneOverSigma2 - (4.0*x*x*x*yrels)*oneOverSigma4 - (4.0*x*yrels*yrels*yrels)*oneOverSigma4 - (2.0*(x + (2.0*x*yrels*yrels)*oneOverSigma2))/3.)))*scV;
