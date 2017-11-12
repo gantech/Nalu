@@ -48,8 +48,8 @@ SMDVelocityAuxFunction::do_evaluate(
     const double x = coords[0];
     const double y = coords[1];
 
-    fieldPtr[0] = u_infty_ * (1.0 - (y-ys)/sigma_ * std::exp( - (x*x + (y-ys)*(y-ys))/(sigma_ * sigma_) ) );
-    fieldPtr[1] = u_infty_ * (x/sigma_)  * std::exp( - (x*x + (y-ys)*(y-ys))*oneOverSigma2 );
+    fieldPtr[0] = u_infty_ * (1.0 + (y-ys)/sigma_ * std::exp( - (x*x + (y-ys)*(y-ys))/(sigma_ * sigma_) ) );
+    fieldPtr[1] = -u_infty_ * (x/sigma_)  * std::exp( - (x*x + (y-ys)*(y-ys))*oneOverSigma2 );
 
     fieldPtr += fieldSize;
     coords += spatialDimension;
