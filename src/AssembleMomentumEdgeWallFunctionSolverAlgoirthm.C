@@ -8,6 +8,7 @@
 
 // nalu
 #include <AssembleMomentumEdgeWallFunctionSolverAlgorithm.h>
+#include <ABLForcingAlgorithm.h>
 #include <SolverAlgorithm.h>
 #include <EquationSystem.h>
 #include <LinearSystem.h>
@@ -86,6 +87,11 @@ AssembleMomentumEdgeWallFunctionSolverAlgorithm::execute()
   std::vector<double> scratchVals;
   std::vector<stk::mesh::Entity> connected_nodes;
 
+
+  auto& velABLWall_ = realm_.ablForcingAlg_->velABLWall();
+  auto nx_ = realm_.ablForcingAlg_->velNx() ;
+  auto ny_ = realm_.ablForcingAlg_->velNy() ;
+  
   // bip values
   std::vector<double> uBip(nDim);
   std::vector<double> uBcBip(nDim);
@@ -98,6 +104,7 @@ AssembleMomentumEdgeWallFunctionSolverAlgorithm::execute()
 
   // deal with state
   VectorFieldType &velocityNp1 = velocity_->field_of_state(stk::mesh::StateNP1);
+  VectorFieldType *coordinates = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
 
   // define some common selectors
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
@@ -175,10 +182,13 @@ AssembleMomentumEdgeWallFunctionSolverAlgorithm::execute()
         const double rhoBip = *stk::mesh::field_data(*density_, nodeR);
         const double muBip = *stk::mesh::field_data(*viscosity_, nodeR);
 
+        const double * coords = stk::mesh::field_data(*coordinates, nodeR);
+        int ih = static_cast<int>(std::floor((coords[0] + 1.0e-10) / nx_));
+        int jh = static_cast<int>(std::floor((coords[1] + 1.0e-10) / ny_));
+        
         for ( int j = 0; j < nDim; ++j ) {
-          const double *uNp1 = stk::mesh::field_data(velocityNp1, nodeR);
           const double *uBc = stk::mesh::field_data(*bcVelocity_, nodeR);
-          p_uBip[j] = uNp1[j];
+          p_uBip[j] = velABLWall_[ih*ny_+jh+j];
           p_uBcBip[j] = uBc[j];
         }
 
@@ -212,12 +222,10 @@ AssembleMomentumEdgeWallFunctionSolverAlgorithm::execute()
               const double om_nini = 1.0 - ninj;
               uiTan += om_nini*p_uBip[j];
               uiBcTan += om_nini*p_uBcBip[j];
-              p_lhs[rowR+localFaceNode*nDim+i] += lambda*om_nini;
             }
             else {
               uiTan -= ninj*p_uBip[j];
               uiBcTan -= ninj*p_uBcBip[j];
-              p_lhs[rowR+localFaceNode*nDim+j] -= lambda*ninj;
             }
           }
           p_rhs[indexR] -= lambda*(uiTan-uiBcTan);
