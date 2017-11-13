@@ -124,6 +124,15 @@ public:
     return (momentumForcingOn() || temperatureForcingOn());
   }
 
+  inline const std::vector<double>& velABLWall()
+  { return velABLWall_; }
+
+  inline double velNx()
+  { return pnx_; }
+
+  inline double velNy()
+  { return pny_; }
+
 private:
   ABLForcingAlgorithm();
   ABLForcingAlgorithm(const ABLForcingAlgorithm&);
@@ -166,6 +175,10 @@ private:
   void calc_mean_velocity();
 
   void calc_mean_temperature();
+
+  void initialize_wall_sampling();
+
+  void populate_wall_sampling();
 
   //! Reference to Realm
   Realm& realm_;
@@ -269,6 +282,12 @@ private:
   //! Vector of plane generation instances for individual heights
   std::vector<std::unique_ptr<Plane2D>> planeGenerators_;
 
+  //! Velocity at sampling plane for wall nodes
+  std::vector<double> velABLWall_;
+
+  double pdx_, pdy_;
+
+  int pnx_, pny_;
 };
 }
 }

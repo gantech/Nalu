@@ -176,6 +176,12 @@ ABLForcingAlgorithm::load_momentum_info(const YAML::Node& node)
   for (int i = 0; i < ndim; i++) {
     USource_[i].resize(nHeights);
   }
+
+  auto& wall_info = node["abl_wall_sampling"];
+  pdx_ = wall_info["dx"].as<double>();
+  pdy_ = wall_info["dy"].as<double>();
+  pnx_ = wall_info["nx"].as<double>();
+  pny_ = wall_info["ny"].as<double>();
 }
 
 void
@@ -400,6 +406,8 @@ ABLForcingAlgorithm::initialize()
     uyFile.close();
     uzFile.close();
   }
+
+  initialize_wall_sampling();
 }
 
 void
@@ -449,7 +457,10 @@ ABLForcingAlgorithm::execute()
   transfers_->execute();
 
   if (momentumForcingOn())
+  {
     compute_momentum_sources();
+    populate_wall_sampling();
+  }
 
   if (temperatureForcingOn())
     compute_temperature_sources();
@@ -680,6 +691,64 @@ ABLForcingAlgorithm::eval_temperature_source(const double zp, double& tempSrc)
   } else {
     utils::linear_interp(tempHeights_, TSource_, zp, tempSrc);
   }
+}
+
+void
+ABLForcingAlgorithm::initialize_wall_sampling()
+{
+  auto& meta = realm_.meta_data();
+  auto& bulk = realm_.bulk_data();
+
+  auto* part = meta.get_part(velPartNames_[0]);
+  stk::mesh::Selector sel(*part);
+  auto& bkts = bulk.get_buckets(stk::topology::NODE_RANK, sel);
+
+  int num_nodes = 0;
+  for (auto b: bkts) num_nodes += b->size();
+
+  velABLWall_.resize(num_nodes * 3);
+}
+
+void
+ABLForcingAlgorithm::populate_wall_sampling()
+{
+
+  auto& meta = realm_.meta_data();
+  auto& bulk = realm_.bulk_data();
+
+  auto* part = meta.get_part(velPartNames_[0]);
+  stk::mesh::Selector sel(*part);
+  auto& bkts = bulk.get_buckets(stk::topology::NODE_RANK, sel);
+  VectorFieldType* coords = meta.get_field<VectorFieldType>(
+    stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  VectorFieldType* velocity = meta.get_field<VectorFieldType>(
+    stk::topology::NODE_RANK, "velocity");
+
+  int num_entries = velABLWall_.size();
+  std::vector<double> velLocal(num_entries, 0.0);
+
+  for (size_t i=0; i < num_entries; i++) velABLWall_[i] = 0.0;
+
+  for (auto b: bkts) {
+    for(size_t in=0; in < b->size(); in++) {
+      auto node = (*b)[in];
+
+      if (!bulk.bucket(node).owned()) continue;
+
+      double* crd = stk::mesh::field_data(*coords, node);
+      double* vel = stk::mesh::field_data(*velocity, node);
+
+      int ih = static_cast<int>(std::floor((crd[0] + 1.0e-10) / pdx_));
+      int jh = static_cast<int>(std::floor((crd[1] + 1.0e-10) / pdy_));
+
+      int idx = ih * pny_ + jh;
+      for (int d=0; d < 3; d++) {
+        velLocal[idx + d] = vel[d];
+      }
+    }
+  }
+
+  stk::all_reduce_sum(bulk.parallel(), velLocal.data(), velABLWall_.data(), num_entries);
 }
 
 } // namespace nalu
