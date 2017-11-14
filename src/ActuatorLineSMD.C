@@ -255,9 +255,12 @@ ActuatorLineSMD::initialize()
 
   allocateSMDToProc();
   p_smd.init() ;
-  std::vector<double> ws_pointGasVelocity(2);
-  ws_pointGasVelocity[0] = 2.0; ws_pointGasVelocity[1] = 0.0; 
-  p_smd.setVelocity_n(ws_pointGasVelocity, 0, 0);
+  
+  if (NaluEnv::self().parallel_rank() == p_smd.get_procNo(0)) {
+      std::vector<double> ws_pointGasVelocity(2);
+      ws_pointGasVelocity[0] = 2.0; ws_pointGasVelocity[1] = 0.0; 
+      p_smd.setVelocity_n(ws_pointGasVelocity, 0, 0);
+  }
   p_smd.solution0();
   
   update(); // Update location of actuator points, ghosting etc.
