@@ -471,7 +471,8 @@ ActuatorLineSMD::execute()
     }
       
     //Step SMD
-    for(int j=0; j < tStepRatio_; j++) p_smd.step();
+    p_smd.step();
+    p_smd.advanceStates();
   }
 
   update();
@@ -742,7 +743,7 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
 
 	  // set model coordinates from SMD
 	  // move the coordinates
-	  p_smd.getCoordinates_n(currentCoords, 0, 0);
+	  p_smd.getCoordinates_np1(currentCoords, 0, 0);
 
           double searchRadius = actuatorLineInfo->epsilon_.x_ * 2000.0;
 
