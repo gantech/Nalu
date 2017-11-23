@@ -180,6 +180,8 @@ BdyLayerStatistics::compute_velocity_stats()
 
   const auto bkts = bulk.get_buckets(stk::topology::NODE_RANK, sel);
 
+  ScalarFieldType* density = meta.get_field<ScalarFieldType>(
+    stk::topology::NODE_RANK, "density");
   VectorFieldType* velocity = meta.get_field<VectorFieldType>(
     stk::topology::NODE_RANK, "velocity");
   VectorFieldType* velTimeAvg = meta.get_field<VectorFieldType>(
@@ -198,12 +200,14 @@ BdyLayerStatistics::compute_velocity_stats()
   std::vector<double> velBarMean(nHeights * nDim_, 0.0);
   std::vector<double> uiujMean(nHeights * nDim_ * 2, 0.0);
   std::vector<double> sfsMean(nHeights * nDim_ * 2, 0.0);
+  std::vector<double> rhoMean(nHeights, 0.0);
 
   // Global reduction arrays
   std::vector<double> gVelMean(nHeights * nDim_, 0.0);
   std::vector<double> gVelBarMean(nHeights * nDim_, 0.0);
   std::vector<double> gUiujMean(nHeights * nDim_ * 2, 0.0);
   std::vector<double> gSfsMean(nHeights * nDim_ * 2, 0.0);
+  std::vector<double> gRhoMean(nHeights);
 
   // Sum up all the local contributions
   for (auto b: bkts) {
@@ -216,13 +220,17 @@ BdyLayerStatistics::compute_velocity_stats()
       double dVol = *(double*)stk::mesh::field_data(*dualVol, node);
       vol[ih] += dVol;
 
+      // Density calcs
+      double rho = *stk::mesh::field_data(*density, node);
+      rhoMean[ih] += rho * dVol;
+
       // Velocity calculations
       {
         double* vel = stk::mesh::field_data(*velocity, node);
         double* velA = stk::mesh::field_data(*velTimeAvg, node);
 
         for (int d=0; d < nDim_; d++) {
-          velMean[offset + d] += vel[d] * dVol;
+          velMean[offset + d] += vel[d] * rho * dVol;
           velBarMean[offset + d] += velA[d] * dVol;
         }
       }
@@ -250,13 +258,14 @@ BdyLayerStatistics::compute_velocity_stats()
   stk::all_reduce_sum(bulk.parallel(), sfsMean.data(), gSfsMean.data(), nHeights*nDim_*2);
   stk::all_reduce_sum(bulk.parallel(), uiujMean.data(), gUiujMean.data(), nHeights*nDim_*2);
   stk::all_reduce_sum(bulk.parallel(), vol.data(), gVol.data(), nHeights);
+  stk::all_reduce_sum(bulk.parallel(), rhoMean.data(), gRhoMean.data(), nHeights);
 
   // Compute averages
   for (size_t ih=0; ih < nHeights; ih++) {
     int offset = ih * nDim_;
 
     for (int d=0; d < nDim_; d++) {
-      velAvg_[offset + d] = gVelMean[offset + d] / gVol[ih];
+      velAvg_[offset + d] = gVelMean[offset + d] / gRhoMean[ih];
       velBarAvg_[offset + d] = gVelBarMean[offset + d] / gVol[ih];
     }
 
