@@ -18,6 +18,7 @@
 #include <user_functions/SteadyThermalContactAuxFunction.h>
 #include <user_functions/SteadyTaylorVortexVelocityAuxFunction.h>
 #include <user_functions/SteadyTaylorVortexGradPressureAuxFunction.h>
+#include <user_functions/EkmanLayerVelocityAuxFunction.h>
 #include <user_functions/ConvectingTaylorVortexVelocityAuxFunction.h>
 #include <user_functions/ConvectingTaylorVortexPressureAuxFunction.h>
 #include <user_functions/VariableDensityVelocityAuxFunction.h>
@@ -254,6 +255,9 @@ SolutionNormPostProcessing::analytical_function_factory(
   else if ( functionName == "kovasznay_dpdx" ) {
     theAuxFunc = new KovasznayPressureGradientAuxFunction(0,realm_.meta_data().spatial_dimension());
   }
+  else if ( functionName == "EkmanLayer" ) {
+    theAuxFunc = new EkmanLayerVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
+  }
   else if ( functionName == "convecting_taylor_vortex" ) {
     theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
   }
@@ -275,7 +279,7 @@ SolutionNormPostProcessing::analytical_function_factory(
       "steady_2d_thermal, steady_3d_thermal, steady_3d_thermal_dtdx, SteadyTaylorVortexVelocity, "
       "VariableDensityVelocity, VariableDensityNonIsoVelocity, SteadyTaylorVortexGradPressure, "
       "SteadyTaylorVortexGradPressure, VariableDensityNonIsoTemperature, kovasznay, "
-      "kovasznay_dpdx, convecting_taylor_vortex, convecting_taylor_vortex_dpdx, "
+      "kovasznay_dpdx, EkmanLayer, convecting_taylor_vortex, convecting_taylor_vortex_dpdx, "
       "wind_energy_taylor_vortex, wind_energy_taylor_vortex_dpdx "
       "user functions supported");
   }

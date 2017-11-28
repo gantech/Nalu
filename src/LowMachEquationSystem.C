@@ -126,6 +126,8 @@
 #include <user_functions/ConvectingTaylorVortexPressureAuxFunction.h>
 #include <user_functions/TornadoAuxFunction.h>
 
+#include <user_functions/EkmanLayerVelocityAuxFunction.h>
+
 #include <user_functions/WindEnergyAuxFunction.h>
 #include <user_functions/WindEnergyTaylorVortexAuxFunction.h>
 #include <user_functions/WindEnergyTaylorVortexPressureAuxFunction.h>
@@ -569,6 +571,9 @@ LowMachEquationSystem::register_initial_condition_fcn(
     }
     else if ( fcnName == "convecting_taylor_vortex" ) {
       theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,nDim); 
+    }
+    else if ( fcnName == "EkmanLayer" ) {
+      theAuxFunc = new EkmanLayerVelocityAuxFunction(0,nDim); 
     }
     else if ( fcnName == "TaylorGreen" ) {
       theAuxFunc = new TaylorGreenVelocityAuxFunction(0,nDim); 
@@ -1443,6 +1448,9 @@ MomentumEquationSystem::register_inflow_bc(
     // switch on the name found...
     if ( fcnName == "convecting_taylor_vortex" ) {
       theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,nDim);
+    }
+    else if ( fcnName == "EkmanLayer" ) {
+      theAuxFunc = new EkmanLayerVelocityAuxFunction(0,nDim);
     }
     else if ( fcnName == "SteadyTaylorVortex" ) {
       theAuxFunc = new SteadyTaylorVortexVelocityAuxFunction(0,nDim);
@@ -2510,6 +2518,9 @@ ContinuityEquationSystem::register_inflow_bc(
     // switch on the name found...
     if ( fcnName == "convecting_taylor_vortex" ) {
       theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,nDim);
+    }
+    else if ( fcnName == "EkmanLayer" ) {
+      theAuxFunc = new EkmanLayerVelocityAuxFunction(0,nDim);
     }
     else if ( fcnName == "SteadyTaylorVortex" ) {
       theAuxFunc = new SteadyTaylorVortexVelocityAuxFunction(0,nDim);

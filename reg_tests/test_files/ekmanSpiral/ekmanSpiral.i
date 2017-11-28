@@ -106,7 +106,7 @@ realms:
         - user_constants:
             east_vector: [1.0,0.0,0.0]
             north_vector: [0.0,1.0,0.0]
-            latitude: 30.0
+            latitude: 90.0
             earth_angular_velocity: 7.2921159e-5
 
         - hybrid_factor:
@@ -120,7 +120,7 @@ realms:
             momentum: body_force
 
         - source_term_parameters:
-            momentum: [0.0, 0.0010935, 0.0]
+            momentum: [0.0, 0.002187, 0.0]
 
     output:
       output_data_base_name: ekmanSpiral.e
