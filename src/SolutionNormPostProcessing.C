@@ -25,6 +25,8 @@
 #include <user_functions/VariableDensityMixFracAuxFunction.h>
 #include <user_functions/SMDVelocityAuxFunction.h>
 #include <user_functions/SMDPressureAuxFunction.h>
+#include <user_functions/SinVelocityAuxFunction.h>
+#include <user_functions/SinPressureAuxFunction.h>
 #include <user_functions/KovasznayVelocityAuxFunction.h>
 #include <user_functions/KovasznayPressureAuxFunction.h>
 
@@ -257,11 +259,20 @@ SolutionNormPostProcessing::analytical_function_factory(
   else if ( functionName == "smd_mms_velocity" ) {
       theAuxFunc = new SMDVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
   }
+  else if ( functionName == "sin_mms_velocity" ) {
+      theAuxFunc = new SinVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
+  }
   else if ( functionName == "smd_mms_pressure" ) {
       theAuxFunc = new SMDPressureAuxFunction();
   }
+  else if ( functionName == "sin_mms_pressure" ) {
+      theAuxFunc = new SinPressureAuxFunction();
+  }
   else if ( functionName == "smd_mms_dpdx" ) {
       theAuxFunc = new SMDPressureGradientAuxFunction(0,realm_.meta_data().spatial_dimension());
+  }  
+  else if ( functionName == "sin_mms_dpdx" ) {
+      theAuxFunc = new SinPressureGradientAuxFunction(0,realm_.meta_data().spatial_dimension());
   }  
   else if ( functionName == "convecting_taylor_vortex" ) {
     theAuxFunc = new ConvectingTaylorVortexVelocityAuxFunction(0,realm_.meta_data().spatial_dimension());
