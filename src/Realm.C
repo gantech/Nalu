@@ -4371,7 +4371,6 @@ Realm::process_multi_physics_transfer()
 
   // check for actuator line
   if ( NULL != actuator_ ) {
-      NaluEnv::self().naluOutput() << "Calling predict_struct_time_step " << std::endl ;
       actuator_->sample_vel();
       actuator_->predict_struct_time_step();
   }

@@ -426,14 +426,126 @@ ActuatorLineFAST::update()
 
 }
 
-// predict the state of the structural model at the next time step
-void ActuatorLineFAST::predict_struct_time_step();
+// predict the state of OpenFAST at the next time step
+void ActuatorLineFAST::predict_struct_time_step() {
 
-// firmly advance the state of the structural model to the next time step
-void ActuatorLineFAST::advance_struct_time_step();
+    if ( ! FAST.isDryRun() ) {
+
+        FAST.interpolateVel_ForceToVelNodes();
+
+        if ( FAST.isTimeZero() ) {
+            FAST.solution0();
+        }
+
+        //Predict states at the next time step in OpenFAST
+        for(int j=0; j < tStepRatio_; j++) FAST.predict_states();
+    }
+    
+}
+
+// firmly advance OpenFAST to the next time step
+void ActuatorLineFAST::advance_struct_time_step() {
+
+    if ( ! FAST.isDryRun() ) {
+
+        //Move OpenFAST to next time step
+        for(int j=0; j < tStepRatio_; j++) FAST.move_to_next_time_step();
+    }
+    
+}
   
 // sample velocity at the actuator points and send to the structural model
-void ActuatorLineFAST::sample_vel();
+void ActuatorLineFAST::sample_vel() {
+
+  // meta/bulk data and nDim
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+  stk::mesh::BulkData & bulkData = realm_.bulk_data();
+  const int nDim = metaData.spatial_dimension();
+
+  // extract fields
+  VectorFieldType *coordinates
+    = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  ScalarFieldType *density
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
+  ScalarFieldType *dualNodalVolume
+    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
+  // deal with proper viscosity
+  //  const std::string viscName = realm_.is_turbulent() ? "effective_viscosity" : "viscosity";
+  //  ScalarFieldType *viscosity
+  //    = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName);
+
+  // fixed size scratch
+  std::vector<double> ws_pointGasVelocity(nDim);
+  std::vector<double> ws_elemCentroid(nDim);
+  std::vector<double> ws_pointForce(nDim);
+  std::vector<double> ws_nodeForce(nDim);
+  double ws_pointGasDensity;
+  //  double ws_pointGasViscosity;
+
+  // parallel communicate data to the ghosted elements; again can communicate points to element ranks
+  if ( NULL != actuatorLineGhosting_ ) {
+    std::vector< const stk::mesh::FieldBase *> ghostFieldVec;
+    // fields that are needed
+    ghostFieldVec.push_back(coordinates);
+    ghostFieldVec.push_back(velocity);
+    ghostFieldVec.push_back(dualNodalVolume);
+    //    ghostFieldVec.push_back(viscosity);
+    stk::mesh::communicate_field_data(*actuatorLineGhosting_, ghostFieldVec);
+  }
+
+  // loop over map and get velocity at points
+  std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
+  int np=0;
+  for (iterPoint  = actuatorLinePointInfoMap_.begin();
+       iterPoint != actuatorLinePointInfoMap_.end();
+       ++iterPoint) {
+
+    // actuator line info object of interest
+    ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
+
+    //==========================================================================
+    // extract the best element; compute drag given this velocity, property, etc
+    // this point drag value will be used by all other elements below
+    //==========================================================================
+    stk::mesh::Entity bestElem = infoObject->bestElem_;
+    int nodesPerElement = bulkData.num_nodes(bestElem);
+
+    // resize some work vectors
+    resize_std_vector(nDim, ws_coordinates_, bestElem, bulkData);
+    resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
+    //    resize_std_vector(1, ws_viscosity_, bestElem, bulkData);
+    resize_std_vector(1, ws_density_, bestElem, bulkData);
+
+    // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
+    gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem),
+                 nodesPerElement);
+    gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem),
+                            nodesPerElement);
+    //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem),
+    //                            nodesPerElement);
+    gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem),
+                            nodesPerElement);
+
+    // interpolate velocity
+    interpolate_field(nDim, bestElem, bulkData, infoObject->isoParCoords_.data(),
+                      &ws_velocity_[0], ws_pointGasVelocity.data());
+
+    // interpolate viscosity
+    //    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]),
+    //                      &ws_viscosity_[0], &ws_pointGasViscosity);
+
+    // interpolate density
+    interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(),
+                      &ws_density_[0], &ws_pointGasDensity);
+
+    FAST.setVelocityForceNode(ws_pointGasVelocity, np, infoObject->globTurbId_);
+    np = np + 1;
+
+  }
+    
+    
+}
 
 
 /** This function is called at each time step. This samples the velocity at each actuator point,
@@ -443,6 +555,11 @@ void ActuatorLineFAST::sample_vel();
 void
 ActuatorLineFAST::execute()
 {
+
+  FAST.extrapolate_vel_force_node_data(); //Predict the location and force at the actuator points at time step 'n+1'
+    
+  update(); //Move the actuator points to the predicted location and do search, ghosting etc.
+    
   // meta/bulk data and nDim
   stk::mesh::MetaData & metaData = realm_.meta_data();
   stk::mesh::BulkData & bulkData = realm_.bulk_data();
@@ -507,70 +624,6 @@ ActuatorLineFAST::execute()
     stk::mesh::communicate_field_data(*actuatorLineGhosting_, ghostFieldVec);
   }
 
-  // loop over map and get velocity at points
-  std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
-  int np=0;
-  for (iterPoint  = actuatorLinePointInfoMap_.begin();
-       iterPoint != actuatorLinePointInfoMap_.end();
-       ++iterPoint) {
-
-    // actuator line info object of interest
-    ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
-
-    //==========================================================================
-    // extract the best element; compute drag given this velocity, property, etc
-    // this point drag value will be used by all other elements below
-    //==========================================================================
-    stk::mesh::Entity bestElem = infoObject->bestElem_;
-    int nodesPerElement = bulkData.num_nodes(bestElem);
-
-    // resize some work vectors
-    resize_std_vector(nDim, ws_coordinates_, bestElem, bulkData);
-    resize_std_vector(nDim, ws_velocity_, bestElem, bulkData);
-    //    resize_std_vector(1, ws_viscosity_, bestElem, bulkData);
-    resize_std_vector(1, ws_density_, bestElem, bulkData);
-
-    // gather nodal data to element nodes; both vector and scalar; coords are used in determinant calc
-    gather_field(nDim, &ws_coordinates_[0], *coordinates, bulkData.begin_nodes(bestElem),
-                 nodesPerElement);
-    gather_field_for_interp(nDim, &ws_velocity_[0], *velocity, bulkData.begin_nodes(bestElem),
-                            nodesPerElement);
-    //    gather_field_for_interp(1, &ws_viscosity_[0], *viscosity, bulkData.begin_nodes(bestElem),
-    //                            nodesPerElement);
-    gather_field_for_interp(1, &ws_density_[0], *density, bulkData.begin_nodes(bestElem),
-                            nodesPerElement);
-
-    // interpolate velocity
-    interpolate_field(nDim, bestElem, bulkData, infoObject->isoParCoords_.data(),
-                      &ws_velocity_[0], ws_pointGasVelocity.data());
-
-    // interpolate viscosity
-    //    interpolate_field(1, bestElem, bulkData, &(infoObject->isoParCoords_[0]),
-    //                      &ws_viscosity_[0], &ws_pointGasViscosity);
-
-    // interpolate density
-    interpolate_field(1, bestElem, bulkData, infoObject->isoParCoords_.data(),
-                      &ws_density_[0], &ws_pointGasDensity);
-
-    FAST.setVelocityForceNode(ws_pointGasVelocity, np, infoObject->globTurbId_);
-    np = np + 1;
-
-  }
-
-
-
-  if ( ! FAST.isDryRun() ) {
-
-    FAST.interpolateVel_ForceToVelNodes();
-
-    if ( FAST.isTimeZero() ) {
-      FAST.solution0();
-    }
-
-    //Step FAST
-    for(int j=0; j < tStepRatio_; j++) FAST.step();
-  }
-
   update();
 
   // reset the thrust and torque from each turbine to zero
@@ -583,7 +636,8 @@ ActuatorLineFAST::execute()
   }
 
   // loop over map and assemble source terms
-  np = 0;
+  int np = 0;
+  std::map<size_t, ActuatorLineFASTPointInfo *>::iterator iterPoint;
   for (iterPoint  = actuatorLinePointInfoMap_.begin();
        iterPoint != actuatorLinePointInfoMap_.end();
        ++iterPoint) {
@@ -591,13 +645,13 @@ ActuatorLineFAST::execute()
     // actuator line info object of interest
     ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
 
-    FAST.getForce(ws_pointForce, np, infoObject->globTurbId_);
+    FAST.getForce(ws_pointForce, np, infoObject->globTurbId_, fast::np1);
 
     std::vector<double> hubPos(3);
     std::vector<double> hubShftVec(3);
     int iTurbGlob = infoObject->globTurbId_;
-    FAST.getHubPos(hubPos, iTurbGlob);
-    FAST.getHubShftDir(hubShftVec, iTurbGlob);
+    FAST.getHubPos(hubPos, iTurbGlob, fast::np1);
+    FAST.getHubShftDir(hubShftVec, iTurbGlob, fast::np1);
 
     // get the vector of elements
     std::set<stk::mesh::Entity> nodeVec = infoObject->nodeVec_;
@@ -876,7 +930,7 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
 
 	  // set model coordinates from FAST
 	  // move the coordinates; set the velocity... may be better on the lineInfo object
-	  FAST.getForceNodeCoordinates(currentCoords, np, iTurb);
+	  FAST.getForceNodeCoordinates(currentCoords, np, iTurb, fast::np1);
 
           double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
 
