@@ -17,7 +17,7 @@
 
 #include <ABLProfileFunction.h>
 
-// stk_mesh/base/fem
+// stk_mesh/base/fem/util
 #include <stk_mesh/base/BulkData.hpp>
 #include <stk_mesh/base/Field.hpp>
 #include <stk_mesh/base/FieldParallel.hpp>
@@ -25,6 +25,7 @@
 #include <stk_mesh/base/GetEntities.hpp>
 #include <stk_mesh/base/MetaData.hpp>
 #include <stk_mesh/base/Part.hpp>
+#include <stk_util/parallel/ParallelReduce.hpp>
 
 // basic c++
 #include <cmath>
@@ -75,6 +76,13 @@ ComputeABLWallFrictionVelocityAlgorithm::ComputeABLWallFrictionVelocityAlgorithm
   wallNormalDistanceBip_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "wall_normal_distance_bip");
   assembledWallArea_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "assembled_wall_area_wf");
   assembledWallNormalDistance_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "assembled_wall_normal_distance");
+
+
+  std::fstream uTauFile;
+  uTauFile.open("abl_utau_hist.dat", std::fstream::out);
+  uTauFile << "# Time, " ;
+  uTauFile << std::endl ;
+  
 }
 
 //--------------------------------------------------------------------------
@@ -101,7 +109,11 @@ ComputeABLWallFrictionVelocityAlgorithm::execute()
   StableABLProfileFunction StableProfFun(gamma_m_, gamma_h_);
   UnstableABLProfileFunction UnstableProfFun(beta_m_, beta_h_);
   NeutralABLProfileFunction NeutralProfFun;
-  
+
+  //Quantities to get the averate utau over the whole sideset
+  std::array<double, 2> uTauAreaSumLocal{0.0, 0.0}; // First value hold uTau * area, second value holds area. To get average utau, sum both quantities over all processes and divide one by another.
+  std::array<double, 2> uTauAreaSumGlobal{0.0, 0.0};
+  double utau_calc;
 
   // zero out assembled nodal quantities
   zero_nodal_fields();
@@ -326,10 +338,27 @@ ComputeABLWallFrictionVelocityAlgorithm::execute()
 
 	const double TfluxBip = heatFluxBip / (rhoBip * CpBip);
         compute_utau(uTangential, ypBip, TfluxBip, p_ABLProfFun, wallFrictionVelocityBip[ip]);
+        uTauAreaSumLocal[0] += wallFrictionVelocityBip[ip] * aMag ;
+        uTauAreaSumLocal[1] += aMag ;
       }
     }
   }
+  
+  stk::all_reduce_sum(NaluEnv::self().parallel_comm(), uTauAreaSumLocal.data(), uTauAreaSumGlobal.data(), 2);
+  utau_calc = uTauAreaSumGlobal[0]/uTauAreaSumGlobal[1] ;
+  const double currTime = realm_.get_current_time();
 
+  if ( NaluEnv::self().parallel_rank() == 0 ) {
+      std::fstream uTauFile;
+      uTauFile.open("abl_utau_hist.dat", std::fstream::app);
+      uTauFile << std::setw(12) << currTime << ", ";    
+      uTauFile << std::setprecision(6)
+               << std::setw(15)
+               << utau_calc ;
+      uTauFile << std::endl;
+      uTauFile.close();
+  }
+      
   // parallel assemble and normalize
   normalize_nodal_fields();
 }
@@ -380,7 +409,7 @@ ComputeABLWallFrictionVelocityAlgorithm::compute_utau(
   }
   const double log_z_over_z0 = std::log(zp / z0_);
 
-  // initial guesses for utau
+  // Initial guesses for utau
   const double eps_u = 1.0e-8;
   const double perturb = 1.0e-3;
  
