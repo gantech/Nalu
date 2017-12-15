@@ -8,7 +8,7 @@
 #ifdef NALU_USES_OPENFAST
 
 /** @file ActuatorLineFAST.h
- *  @brief A class to couple Nalu with FAST for actuator line simulations of wind turbines
+ *  @brief A class to couple Nalu with OpenFAST for actuator line simulations of wind turbines
  *
  */
 

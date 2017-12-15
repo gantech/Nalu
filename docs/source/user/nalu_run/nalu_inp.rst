@@ -939,6 +939,59 @@ Time-step Control Options
 
    Maximum allowable increase in ``dt`` over a given timestep.
 
+Actuator 
+````````
+
+.. inpfile:: actuator
+
+   ``acuator`` subsection defines the inputs for actuator line simulations. A
+   sample section is shown below for running actuator line simulations
+   coupled to OpenFAST with two turbines.
+
+.. code-block:: yaml   
+   
+     actuator:
+     type: ActLineFAST
+     search_method: boost_rtree
+     search_target_part: Unspecified-2-HEX
+     
+     n_turbines_glob: 2
+     dry_run:  False
+     debug:    False
+     t_start: 0.0
+     simStart: init # init/trueRestart/restartDriverInitFAST
+     t_max:    5.0
+     n_every_checkpoint: 100
+     
+     Turbine0:
+       procNo: 0
+       num_force_pts_blade: 50
+       num_force_pts_tower: 20
+       epsilon: [ 5.0, 5.0, 5.0 ]
+       turbine_base_pos: [ 0.0, 0.0, -90.0 ]
+       turbine_hub_pos: [ 0.0, 0.0, 0.0 ]
+       restart_filename: "blah"
+       FAST_input_filename: "Test01.fst"
+       turb_id:  1
+       turbine_name: machine_zero
+  
+     Turbine1:
+       procNo: 0
+       num_force_pts_blade: 50
+       num_force_pts_tower: 20
+       epsilon: [ 5.0, 5.0, 5.0 ]
+       turbine_base_pos: [ 250.0, 0.0, -90.0 ]
+       turbine_hub_pos: [ 250.0, 0.0, 0.0 ]
+       restart_filename: "blah"
+       FAST_input_filename: "Test02.fst"
+       turb_id:  2
+       turbine_name: machine_one
+     
+.. note::
+
+   While Nalu itself supports a full restart capability, OpenFAST may not support a full restart capability for specific use cases. To account for this, the OpenFAST - C++ API supports two kinds of restart capabilities. To restart a Nalu - OpenFAST coupled simulation one must set `t_start` in the line commands to a positive non-zero value and set `simStart` to either `trueRestart` or `restartDriverInitFAST`. Use `trueRestart` when OpenFAST supports a full restart capability for the specific use case. `restartDriverInitFAST` will start OpenFAST from `t=0` again for all turbines and run upto the restart time and then run the coupled Nalu + OpenFAST simulation normally. During the Nalu - OpenFAST he sampled velocity data at the actuator nodes is stored in a `hdf5` file at every OpenFAST time step and then read back in when using the `restart`. 
+   
+
 Turbulence averaging
 ````````````````````
 
