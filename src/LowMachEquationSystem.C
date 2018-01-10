@@ -46,6 +46,9 @@
 #include <ComputeMdotEdgeOpenAlgorithm.h>
 #include <ComputeMdotElemOpenAlgorithm.h>
 #include <ComputeMdotNonConformalAlgorithm.h>
+#include <ComputeMomKEFluxAlgorithmDriver.h>
+#include <ComputeMomKEFluxInflowAlgorithm.h>
+#include <ComputeMomKEFluxElemOpenAlgorithm.h>
 #include <ComputeWallFrictionVelocityAlgorithm.h>
 #include <ComputeABLWallFrictionVelocityAlgorithm.h>
 #include <ConstantAuxFunction.h>
@@ -388,6 +391,8 @@ LowMachEquationSystem::register_interior_algorithm(
       it->second->partVec_.push_back(part);
     }
   }
+
+  
 }
 
 //--------------------------------------------------------------------------
@@ -1552,6 +1557,8 @@ MomentumEquationSystem::register_inflow_bc(
     itd->second->partVec_.push_back(part);
   }
 
+  
+
 }
 
 //--------------------------------------------------------------------------
@@ -1627,6 +1634,7 @@ MomentumEquationSystem::register_open_bc(
   else {
     itsi->second->partVec_.push_back(part);
   }
+
 }
 
 //--------------------------------------------------------------------------
@@ -2496,6 +2504,12 @@ ContinuityEquationSystem::register_interior_algorithm(
       itsm->second->partVec_.push_back(part);
     }
   }
+
+  ComputeMomKEFluxAlgorithmDriver* theAlg = new ComputeMomKEFluxAlgorithmDriver(realm_);
+  // Compute Momentum and KE flux through boundaries of domain
+  equationSystems_.postIterAlgDriver_.push_back(theAlg);
+  computeMomKEFluxAlgDriver_ = theAlg ; // Store a local copy to the same pointer
+  
 }
 
 //--------------------------------------------------------------------------
@@ -2634,6 +2648,16 @@ ContinuityEquationSystem::register_inflow_bc(
     its->second->partVec_.push_back(part);
   }
 
+  std::map<AlgorithmType, Algorithm *>::iterator it
+      = computeMomKEFluxAlgDriver_->algMap_.find(algType);
+  if ( it == computeMomKEFluxAlgDriver_->algMap_.end() ) {
+      Algorithm *theAlg = new ComputeMomKEFluxInflowAlgorithm(realm_, part, useShifted);
+      computeMomKEFluxAlgDriver_->algMap_[algType] = theAlg;
+  }
+  else {
+      it->second->partVec_.push_back(part);
+  }
+
 }
 
 //--------------------------------------------------------------------------
@@ -2725,6 +2749,22 @@ ContinuityEquationSystem::register_open_bc(
       itsi->second->partVec_.push_back(part);
     }
   }
+
+  std::map<AlgorithmType, Algorithm *>::iterator it
+      = computeMomKEFluxAlgDriver_->algMap_.find(algType);
+  if ( it == computeMomKEFluxAlgDriver_->algMap_.end() ) {
+      Algorithm *theAlg = NULL;
+      if ( realm_.realmUsesEdges_ ) {
+          // does nothing 
+      } else {
+          theAlg = new ComputeMomKEFluxElemOpenAlgorithm(realm_, part);
+      }
+      computeMomKEFluxAlgDriver_->algMap_[algType] = theAlg;
+  }
+  else {
+      it->second->partVec_.push_back(part);
+  }
+  
 }
 
 //--------------------------------------------------------------------------

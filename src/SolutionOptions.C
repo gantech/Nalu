@@ -95,6 +95,9 @@ SolutionOptions::SolutionOptions()
     mdotAlgOpenCorrection_(0.0),
     mdotAlgOpenIpCount_(0),
     mdotAlgOpenPost_(0.0),
+    keAlgAccumulation_(0.0),
+    keAlgInflow_(0.0),
+    keAlgOpen_(0.0),    
     quadType_("GaussLegendre")
 {
   // nothing to do

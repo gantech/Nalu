@@ -148,11 +148,21 @@ public:
   double mdotAlgInflow_;
   double mdotAlgOpen_;
  
-  // global mdot correction alg
+// global mdot correction alg
   bool activateOpenMdotCorrection_;
   double mdotAlgOpenCorrection_;
   size_t mdotAlgOpenIpCount_;
   double mdotAlgOpenPost_;
+
+  // momentum post processing
+  std::vector<double> momAlgAccumulation_;
+  std::vector<double> momAlgInflow_;
+  std::vector<double> momAlgOpen_;
+
+  // kinetic energy post processing
+  double keAlgAccumulation_;
+  double keAlgInflow_;
+  double keAlgOpen_;  
 
   // turbulence model coeffs
   std::map<TurbulenceModelConstant, double> turbModelConstantMap_;

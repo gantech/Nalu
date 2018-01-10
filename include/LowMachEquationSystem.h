@@ -27,6 +27,7 @@ class AssembleNodalGradUAlgorithmDriver;
 class MomentumEquationSystem;
 class ContinuityEquationSystem;
 class ComputeMdotAlgorithmDriver;
+class ComputeMomKEFluxAlgorithmDriver;
 class LinearSystem;
 class ProjectedNodalGradientEquationSystem;
 class SurfaceForceAndMomentAlgorithmDriver;
@@ -181,7 +182,7 @@ public:
   AlgorithmDriver *tviscAlgDriver_;
   AlgorithmDriver *cflReyAlgDriver_;
   AlgorithmDriver *wallFunctionParamsAlgDriver_;
-
+  
   ProjectedNodalGradientEquationSystem *projectedNodalGradEqs_;
 
   double firstPNGResidual_;
@@ -262,6 +263,8 @@ public:
   AssembleNodalGradAlgorithmDriver *assembleNodalGradAlgDriver_;
   ComputeMdotAlgorithmDriver *computeMdotAlgDriver_;
   ProjectedNodalGradientEquationSystem *projectedNodalGradEqs_;
+  AlgorithmDriver *computeMomKEFluxAlgDriver_;
+  
 };
 
 } // namespace nalu
