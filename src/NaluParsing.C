@@ -708,6 +708,19 @@ namespace YAML
     return true;
   }
 
+  bool convert<sierra::nalu::NormalTemperatureGradient>::decode(const Node& node,
+    sierra::nalu::NormalTemperatureGradient& tempGrad)
+  {
+    if (!node.IsScalar())
+    {
+      return false;
+    }
+   
+    tempGrad.tempGradN_ = node.as<double>();
+
+    return true;
+  }
+
   bool convert<sierra::nalu::ReferenceTemperature>::decode(const Node& node,
     sierra::nalu::ReferenceTemperature& rt)
   {
@@ -1144,7 +1157,13 @@ namespace YAML
   bool convert<sierra::nalu::SymmetryUserData>::decode(const Node& node,
     sierra::nalu::SymmetryUserData& symmetryData)
   {
-    // nothing as of yet
+    // This allows the user to set a fixed noraml temperature gradient that is
+    // achieved through application of a compatible normal  heat flux. 
+    if (node["normal_temperature_gradient"])
+    {
+      symmetryData.normalTemperatureGradient_ = node["normal_temperature_gradient"].as<sierra::nalu::NormalTemperatureGradient>();
+      symmetryData.normalTemperatureGradientSpec_ = true;
+    }
     return true;
   }
 
@@ -1176,7 +1195,7 @@ namespace YAML
     if (node["search_method"])
     {
       nonConformalData.searchMethodName_ =
-          node["search_method"].as<std::string>();
+        node["search_method"].as<std::string>();
     }
     if (node["expand_box_percentage"])
     {
@@ -1191,6 +1210,11 @@ namespace YAML
     if (node["search_tolerance"])
     {
       nonConformalData.searchTolerance_ = node["search_tolerance"].as<double>();
+    }
+    if (node["activate_dynamic_search_algorithm"])
+    {
+      nonConformalData.dynamicSearchTolAlg_ =
+        node["activate_dynamic_search_algorithm"].as<bool>();
     }
 
     return true;

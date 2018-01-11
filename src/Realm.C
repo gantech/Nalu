@@ -119,6 +119,7 @@
 #include <stk_mesh/base/Comm.hpp>
 #include <stk_mesh/base/CreateEdges.hpp>
 #include <stk_mesh/base/SkinBoundary.hpp>
+#include <stk_mesh/base/FieldBLAS.hpp>
 
 // stk_io
 #include <stk_io/StkMeshIoBroker.hpp>
@@ -517,6 +518,10 @@ Realm::initialize()
 
   compute_l2_scaling();
 
+  // Now that the inactive selectors have been processed; we are ready to setup
+  // HYPRE IDs
+  set_hypre_global_id();
+
   equationSystems_.initialize();
 
   // check job run size after mesh creation, linear system initialization
@@ -810,12 +815,21 @@ Realm::setup_adaptivity()
 void
 Realm::setup_nodal_fields()
 {
+#ifdef NALU_USES_HYPRE
+  hypreGlobalId_ = &(metaData_->declare_field<HypreIDFieldType>(
+                       stk::topology::NODE_RANK, "hypre_global_id"));
+#endif
   // register global id and rank fields on all parts
   const stk::mesh::PartVector parts = metaData_->get_parts();
   for ( size_t ipart = 0; ipart < parts.size(); ++ipart ) {
     naluGlobalId_ = &(metaData_->declare_field<GlobalIdFieldType>(stk::topology::NODE_RANK, "nalu_global_id"));
     stk::mesh::put_field(*naluGlobalId_, *parts[ipart]);
+
+#ifdef NALU_USES_HYPRE
+    stk::mesh::put_field(*hypreGlobalId_, *parts[ipart]);
+#endif
   }
+
 
   // loop over all material props targets and register nodal fields
   std::vector<std::string> targetNames = get_physics_target_names();
@@ -909,6 +923,12 @@ Realm::setup_post_processing_algorithms()
   }
 
   // check for turbulence averaging fields
+  if (NULL == turbulenceAveragingPostProcessing_ &&
+     solutionOptions_->has_set_boussinesq_time_scale() ) {
+
+     turbulenceAveragingPostProcessing_ =  new TurbulenceAveragingPostProcessing(*this, {});
+  }
+
   if ( NULL != turbulenceAveragingPostProcessing_ )
     turbulenceAveragingPostProcessing_->setup();
 
@@ -1812,8 +1832,12 @@ Realm::pre_timestep_work()
       initialize_non_conformal();
 
     // and overset algorithm
-    if ( hasOverset_ )
+    if ( hasOverset_ ) {
       initialize_overset();
+
+      // Only need to reset HYPRE IDs when overset inactive rows change
+      set_hypre_global_id();
+    }
 
     // now re-initialize linear system
     equationSystems_.reinitialize_linear_system();
@@ -1906,6 +1930,8 @@ Realm::advance_time_step()
       << currentNonlinearIteration_
       << "/" << numNonLinearIterations
       << std::setw(29) << std::right << "Equation System Iteration" << std::endl;
+
+    isFinalOuterIter_ = ((i+1) == numNonLinearIterations);
 
     const bool isConverged = equationSystems_.solve_and_update();
 
@@ -2999,6 +3025,9 @@ Realm::register_interior_algorithm(
   else {
     it->second->partVec_.push_back(part);
   }
+
+  // Track parts that are registered to interior algorithms
+  interiorPartVec_.push_back(part);
 }
 
 //--------------------------------------------------------------------------
@@ -3224,6 +3253,7 @@ Realm::setup_non_conformal_bc(
                            userData.searchMethodName_,
                            userData.clipIsoParametricCoords_,
                            userData.searchTolerance_,
+                           userData.dynamicSearchTolAlg_,
                            nonConformalBCData.targetName_);
 
   nonConformalManager_->nonConformalInfoVec_.push_back(nonConformalInfo);
@@ -3645,6 +3675,11 @@ Realm::populate_derived_quantities()
 void
 Realm::initial_work()
 {
+  // include initial condition in averaging postprocessor
+  if (turbulenceAveragingPostProcessing_ != nullptr) {
+    turbulenceAveragingPostProcessing_->execute();
+  }
+
   if ( solutionOptions_->meshMotion_ )
     process_mesh_motion();
   equationSystems_.initial_work();
@@ -3669,6 +3704,74 @@ Realm::set_global_id()
       naluGlobalIds[k] = bulkData_->identifier(b[k]);
     }
   }
+}
+
+void
+Realm::set_hypre_global_id()
+{
+#ifdef NALU_USES_HYPRE
+  /* Create a mapping of Nalu Global ID (nodes) to Hypre Global ID.
+   *
+   * Background: Hypre requires a contiguous mapping of row IDs for its IJMatrix
+   * and IJVector data structure, i.e., the startID(iproc+1) = endID(iproc) + 1.
+   * Therefore, this method first determines the total number of rows in each
+   * paritition and then determines the starting and ending IDs for the Hypre
+   * matrix and finally assigns the hypre ID for all the nodes on this partition
+   * in the hypreGlobalId_ field.
+   */
+
+  // Fill with an invalid value for future error checking
+  stk::mesh::field_fill(std::numeric_limits<HypreIntType>::max(), *hypreGlobalId_);
+
+  const stk::mesh::Selector s_local = metaData_->locally_owned_part() & !get_inactive_selector();
+  const auto& bkts = bulkData_->get_buckets(
+    stk::topology::NODE_RANK, s_local);
+
+  size_t num_nodes = 0;
+  int nprocs = bulkData_->parallel_size();
+  int iproc = bulkData_->parallel_rank();
+  std::vector<int> nodesPerProc(nprocs);
+  std::vector<stk::mesh::EntityId> hypreOffsets(nprocs+1);
+
+  // 1. Determine the number of nodes per partition and determine appropriate
+  // offsets on each MPI rank.
+  for (auto b: bkts) num_nodes += b->size();
+
+  MPI_Allgather(&num_nodes, 1, MPI_INT, nodesPerProc.data(), 1, MPI_INT,
+                bulkData_->parallel());
+
+  hypreOffsets[0] = 0;
+  for (int i=1; i <= nprocs; i++)
+    hypreOffsets[i] = hypreOffsets[i-1] + nodesPerProc[i-1];
+
+  // These are set up for NDOF=1, the actual lower/upper extents will be
+  // finalized in HypreLinearSystem class based on the equation being solved.
+  hypreILower_ = hypreOffsets[iproc];
+  hypreIUpper_ = hypreOffsets[iproc+1];
+  hypreNumNodes_ = hypreOffsets[nprocs];
+
+  // 2. Sort the local STK IDs so that we retain a 1-1 mapping as much as possible
+  size_t ii=0;
+  std::vector<stk::mesh::EntityId> localIDs(num_nodes);
+  for (auto b: bkts) {
+    for (size_t in=0; in < b->size(); in++) {
+      auto node = (*b)[in];
+      auto nid = bulkData_->identifier(node);
+      localIDs[ii++] = nid;
+    }
+  }
+  std::sort(localIDs.begin(), localIDs.end());
+
+  // 3. Store Hypre global IDs for all the nodes so that this can be used to lookup
+  // and populate Hypre data structures.
+  HypreIntType nidx = static_cast<HypreIntType>(hypreILower_);
+  for (auto nid: localIDs) {
+    auto node = bulkData_->get_entity(
+      stk::topology::NODE_RANK, nid);
+    HypreIntType* hids = stk::mesh::field_data(*hypreGlobalId_, node);
+    *hids = nidx++;
+  }
+#endif
 }
 
 //--------------------------------------------------------------------------
@@ -4848,21 +4951,18 @@ Realm::get_inactive_selector()
   // accumulate inactive parts relative to the universal part
  
   // provide inactive Overset part that excludes background surface
-  stk::mesh::Selector inactiveOverSetSelector =
-    (hasOverset_) ? oversetManager_->get_inactive_selector()
-    : stk::mesh::Selector();
+  //
+  // Treat this selector differently because certain entities from interior
+  // blocks could have been inactivated by the overset algorithm. 
+  stk::mesh::Selector inactiveOverSetSelector = (hasOverset_) ?
+      oversetManager_->get_inactive_selector() : stk::mesh::Selector();
 
-  // provide inactive dataProbe parts
-  stk::mesh::Selector inactiveDataProbeSelector = (NULL != dataProbePostProcessing_)
-    ? (dataProbePostProcessing_->get_inactive_selector())
-    : stk::mesh::Selector();
+  stk::mesh::Selector otherInactiveSelector = (
+    metaData_->universal_part()
+    & !(stk::mesh::selectUnion(interiorPartVec_))
+    & !(stk::mesh::selectUnion(bcPartVec_)));
 
-  stk::mesh::Selector inactiveABLForcing = (
-    ( NULL != ablForcingAlg_)
-    ? (ablForcingAlg_->inactive_selector())
-    : stk::mesh::Selector());
-
-  return inactiveOverSetSelector | inactiveDataProbeSelector | inactiveABLForcing;
+  return inactiveOverSetSelector | otherInactiveSelector;
 }
 
 //--------------------------------------------------------------------------

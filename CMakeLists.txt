@@ -12,6 +12,7 @@ option(ENABLE_PARAVIEW_CATALYST
 option(NALU_USES_SMD
        "Use SMD tpl to get actuator line position and force for spring-mass-damper system" OFF)
 option(ENABLE_TIOGA "Use TIOGA TPL to perform overset connectivity" OFF)
+option(ENABLE_HYPRE "Use HYPRE Solver library" OFF)
 
 SET(CMAKE_FIND_LIBRARY_PREFIXES lib)
 SET(CMAKE_FIND_LIBRARY_SUFFIXES a)
@@ -21,6 +22,12 @@ MESSAGE("   Trilinos_DIR = ${Trilinos_DIR}")
 SET(CMAKE_PREFIX_PATH ${Trilinos_DIR} ${CMAKE_PREFIX_PATH})
 SET(CMAKE_PREFIX_PATH ${Trilinos_PATH} ${CMAKE_PREFIX_PATH})
 find_package(Trilinos REQUIRED)
+
+if (ENABLE_HYPRE)
+  find_package(HYPRE REQUIRED)
+  include_directories(${HYPRE_INCLUDE_DIRS})
+  add_definitions("-DNALU_USES_HYPRE")
+endif (ENABLE_HYPRE)
 
 if (ENABLE_OPENFAST)
    SET(CMAKE_PREFIX_PATH ${OpenFAST_DIR} ${CMAKE_PREFIX_PATH})
@@ -118,6 +125,17 @@ SET(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${Trilinos_Fortran_COMPILER_FLAG
 MESSAGE("-- CMAKE_CXX_FLAGS     = ${CMAKE_CXX_FLAGS}")
 MESSAGE("-- CMAKE_Fortran_FLAGS = ${CMAKE_Fortran_FLAGS}")
 
+if (ENABLE_HYPRE)
+  include(CheckSymbolExists)
+  set(CMAKE_REQUIRED_INCLUDES "${HYPRE_INCLUDE_DIRS}")
+  check_symbol_exists(
+    HYPRE_BIGINT "${HYPRE_INCLUDE_DIRS}/HYPRE_config.h" NALU_HYPRE_BIGINT)
+  if (NOT NALU_HYPRE_BIGINT)
+    message(WARNING
+      "HYPRE does not enable 64-bit integer support; will fail on large problems!")
+  endif()
+endif()
+
 file (GLOB SOURCE src/*.C src/*/*.C src/*/*.F)
 file (GLOB HEADER include/*.h include/*/*.h)
 
@@ -135,6 +153,10 @@ endif (NALU_USES_SMD)
  
 if (ENABLE_TIOGA)
   target_link_libraries(nalu ${TIOGA_LIBRARIES})
+endif()
+
+if (ENABLE_HYPRE)
+  target_link_libraries(nalu ${HYPRE_LIBRARIES})
 endif()
 
 file (GLOB UNIT_TESTS_SOURCES unit_tests/*.C unit_tests/*/*.C)
