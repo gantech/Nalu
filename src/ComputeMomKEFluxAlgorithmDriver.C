@@ -117,10 +117,12 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     solnOpts_.keAlgInflow_ =  g_sum[1];
     solnOpts_.keAlgOpen_ =  g_sum[2];
     for(int j=0; j<nDim; j++) {
-        solnOpts_.momAlgAccumulation_[j] = g_sum[3+3*nDim];
-        solnOpts_.momAlgInflow_[j] = g_sum[3+3*nDim+1];
-        solnOpts_.momAlgOpen_[j] = g_sum[3+3*nDim+2];
+        solnOpts_.momAlgAccumulation_[j] = g_sum[3+3*j];
+        solnOpts_.momAlgInflow_[j] = g_sum[3+3*j+1];
+        solnOpts_.momAlgOpen_[j] = g_sum[3+3*j+2];
     }
+
+    provide_output();
 }
 
 //--------------------------------------------------------------------------
@@ -152,6 +154,8 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
     ? density->field_of_state(stk::mesh::StateN) : density->field_of_state(stk::mesh::StateNM1);
   VectorFieldType *velocity = metaData.get_field<VectorFieldType>(
       stk::topology::NODE_RANK, "velocity");
+  NaluEnv::self().naluOutput() << " Number of states in velocity =  " << velocity->number_of_states() << std::endl ;
+  
   VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
   VectorFieldType &velocityN = velocity->field_of_state(stk::mesh::StateN);
   VectorFieldType &velocityNm1 = (velocity->number_of_states() == 2) 
@@ -271,6 +275,8 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
 
           for ( int j=0; j < nDim; ++j ) {
               velNm1Scv[j] += r*ws_velNm1[ic*nDim+j];
+              velNScv[j] += r*ws_velN[ic*nDim+j];
+              velNp1Scv[j] += r*ws_velNp1[ic*nDim+j];              
           }
           
         }
@@ -283,9 +289,9 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
             keNm1 += 0.5*velNm1Scv[j]*velNm1Scv[j];
             keN += 0.5*velNScv[j]*velNScv[j];
             keNp1 += 0.5*velNp1Scv[j]*velNp1Scv[j];
-            mom_accumulation[j] = (gamma1*rhoNp1Scv*velNm1Scv[j] + gamma2*rhoNScv*velNm1Scv[j] + gamma3*rhoNm1Scv*velNm1Scv[j])/dt*ws_scv_volume[ip];
+            mom_accumulation[j] += (gamma1*rhoNp1Scv*velNm1Scv[j] + gamma2*rhoNScv*velNm1Scv[j] + gamma3*rhoNm1Scv*velNm1Scv[j])/dt*ws_scv_volume[ip];
         }
-        
+
         ke_accumulation +=  
           (gamma1*rhoNp1Scv*keNm1 + gamma2*rhoNScv*keN + gamma3*rhoNm1Scv*keNp1)/dt*ws_scv_volume[ip];
         
@@ -312,30 +318,30 @@ ComputeMomKEFluxAlgorithmDriver::provide_output()
         totalMomClosure[j] = solnOpts_.momAlgAccumulation_[j] + solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j];
     }
     NaluEnv::self().naluOutputP0() << "Momentum Balance Review:  " << std::endl;
-    NaluEnv::self().naluOutputP0() << "Momentum accumulation: " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << solnOpts_.momAlgAccumulation_[j];
+    NaluEnv::self().naluOutputP0() << "  Momentum accumulation: " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << solnOpts_.momAlgAccumulation_[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
     
-    NaluEnv::self().naluOutputP0() << "Integrated inflow:      " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgInflow_[j];
+    NaluEnv::self().naluOutputP0() << "  Integrated inflow:      " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgInflow_[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
 
-    NaluEnv::self().naluOutputP0() << "Integrated open:      " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgOpen_[j];
+    NaluEnv::self().naluOutputP0() << "  Integrated open:      " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgOpen_[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
 
-    NaluEnv::self().naluOutputP0() << "Total momentum closure:   " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << totalMomClosure[j] ;
+    NaluEnv::self().naluOutputP0() << "  Total momentum closure:   " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << totalMomClosure[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
     
     
   // output kinetic energy closure
     const double totalKEClosure = solnOpts_.keAlgAccumulation_ + solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_;
   NaluEnv::self().naluOutputP0() << "Kinetic Energy Balance Review:  " << std::endl;
-  NaluEnv::self().naluOutputP0() << "Energy accumulation: " << solnOpts_.keAlgAccumulation_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "Integrated inflow:      " << std::setprecision (16) << solnOpts_.keAlgInflow_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "Integrated open:      " << std::setprecision (16) << solnOpts_.keAlgOpen_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "Total energy closure:   " << std::setprecision (6) << totalKEClosure << std::endl;
+  NaluEnv::self().naluOutputP0() << "  Energy accumulation: " << solnOpts_.keAlgAccumulation_ << std::endl;
+  NaluEnv::self().naluOutputP0() << "  Integrated inflow:      " << std::setprecision (16) << solnOpts_.keAlgInflow_ << std::endl;
+  NaluEnv::self().naluOutputP0() << "  Integrated open:      " << std::setprecision (16) << solnOpts_.keAlgOpen_ << std::endl;
+  NaluEnv::self().naluOutputP0() << "  Total energy closure:   " << std::setprecision (6) << totalKEClosure << std::endl;
   
 }
 
