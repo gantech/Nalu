@@ -210,6 +210,8 @@ ActuatorLineSMD::load(
       actuatorLineInfo->epsilon_ = epsilon.as<Coordinates>() ;
     else
       throw std::runtime_error("ActuatorLineSMD: lacking epsilon vector");
+    
+    get_required(y_actuatorLine, "af_filename", i_smd.af_filename);
 
     p_smd.setInputs(i_smd);
 
@@ -793,7 +795,7 @@ ActuatorLineSMD::create_actuator_line_point_info_map() {
           double actCoord = std::sin(realm_.get_current_time());
           NaluEnv::self().naluOutput() << "Actual location at n+1 is supposed to be " << actCoord << std::endl ;
           
-          double searchRadius = actuatorLineInfo->epsilon_.x_ * 2000.0;
+          double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
 
 	  for ( int j = 0; j < nDim; ++j )
 	    centroidCoords[j] = currentCoords[j];
