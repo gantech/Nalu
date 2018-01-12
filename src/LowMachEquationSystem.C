@@ -2582,6 +2582,9 @@ ContinuityEquationSystem::register_inflow_bc(
       else if ( fcnName == "BoussinesqNonIso") {
         theAuxFunc = new BoussinesqNonIsoVelocityAuxFunction(0, nDim);
       }
+      else if ( fcnName == "smd_mms_velocity" ) {
+          theAuxFunc = new SMDVelocityAuxFunction(0,nDim);
+      }
       else {
         throw std::runtime_error("ContEquationSystem::register_inflow_bc: limited functions supported");
       }
@@ -2601,9 +2604,6 @@ ContinuityEquationSystem::register_inflow_bc(
     if ( userData.externalData_ ) {
       // xfer will handle population; only need to populate the initial value
       realm_.initCondAlg_.push_back(auxAlg);
-    }
-    else if ( fcnName == "smd_mms_velocity" ) {
-        theAuxFunc = new SMDVelocityAuxFunction(0,nDim);
     }
     else {
       // put it on bcData
