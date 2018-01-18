@@ -50,6 +50,12 @@ ComputeMomKEFluxAlgorithmDriver::ComputeMomKEFluxAlgorithmDriver(
     solnOpts_.momAlgAccumulation_.resize(nDim);
     solnOpts_.momAlgInflow_.resize(nDim);
     solnOpts_.momAlgOpen_.resize(nDim);
+    solnOpts_.momAlgPressureInflow_.resize(nDim);
+    solnOpts_.momAlgPressureSymmetry_.resize(nDim); //Has to be zero
+    solnOpts_.momAlgPressureOpen_.resize(nDim);
+    solnOpts_.momAlgTauInflow_.resize(nDim);
+    solnOpts_.momAlgTauSymmetry_.resize(nDim);
+    solnOpts_.momAlgTauOpen_.resize(nDim);
     
 }
 
@@ -71,6 +77,13 @@ ComputeMomKEFluxAlgorithmDriver::pre_work()
     solnOpts_.keAlgAccumulation_ = 0.0;
     solnOpts_.keAlgInflow_ = 0.0;
     solnOpts_.keAlgOpen_ = 0.0;
+    solnOpts_.keAlgPressureInflow_ = 0.0;
+    solnOpts_.keAlgPressureSymmetry_ = 0.0;
+    solnOpts_.keAlgPressureOpen_ = 0.0;  
+    solnOpts_.keAlgTauInflow_ = 0.0;
+    solnOpts_.keAlgTauSymmetry_ = 0.0;  
+    solnOpts_.keAlgTauOpen_ = 0.0;  
+    solnOpts_.keAlgDissipation_ = 0.0;  
 
     stk::mesh::MetaData & metaData = realm_.meta_data();
     const int nDim = metaData.spatial_dimension();
@@ -78,6 +91,12 @@ ComputeMomKEFluxAlgorithmDriver::pre_work()
         solnOpts_.momAlgAccumulation_[j] = 0.0;
         solnOpts_.momAlgInflow_[j]= 0.0;
         solnOpts_.momAlgOpen_[j]= 0.0;
+        solnOpts_.momAlgPressureInflow_[j] = 0.0;
+        solnOpts_.momAlgPressureSymmetry_[j] = 0.0; //Has to be zero
+        solnOpts_.momAlgPressureOpen_[j] = 0.0;
+        solnOpts_.momAlgTauInflow_[j] = 0.0;
+        solnOpts_.momAlgTauSymmetry_[j] = 0.0;
+        solnOpts_.momAlgTauOpen_[j] = 0.0;
     }
 
 }
@@ -96,6 +115,7 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     double ke_accumulation;
     std::vector<double> mom_accumulation(nDim);
     compute_accumulation(mom_accumulation, ke_accumulation);
+    double ke_dissipation = compute_dissipation();
     
     // parallel communicate
     std::vector<double> l_sum, g_sum;
@@ -104,10 +124,24 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     l_sum[0] = ke_accumulation;
     l_sum[1] = solnOpts_.keAlgInflow_;
     l_sum[2] = solnOpts_.keAlgOpen_ ;
+    l_sum[3] = solnOpts_.keAlgPressureInflow_;
+    l_sum[4] = solnOpts_.keAlgPressureSymmetry_; //Has to be zero
+    l_sum[5] = solnOpts_.keAlgPressureOpen_;  
+    l_sum[6] = solnOpts_.keAlgTauInflow_;
+    l_sum[7] = solnOpts_.keAlgTauSymmetry_;  
+    l_sum[8] = solnOpts_.keAlgTauOpen_;  
+    l_sum[9] = solnOpts_.keAlgDissipation_;  
+    
     for(int j=0; j<nDim; j++) {
-        l_sum[3+j*3]   = mom_accumulation[j];
-        l_sum[3+j*3+1] = solnOpts_.momAlgInflow_[j];
-        l_sum[3+j*3+2] = solnOpts_.momAlgOpen_[j];
+        l_sum[10+j*8]   = mom_accumulation[j];
+        l_sum[10+j*9+1] = solnOpts_.momAlgInflow_[j];
+        l_sum[10+j*9+2] = solnOpts_.momAlgOpen_[j];
+        l_sum[10+j*9+3] = solnOpts_.momAlgPressureInflow_[j];
+        l_sum[10+j*9+4] = solnOpts_.momAlgPressureSymmetry_[j]; 
+        l_sum[10+j*9+5] = solnOpts_.momAlgPressureOpen_[j];
+        l_sum[10+j*9+6] = solnOpts_.momAlgTauInflow_[j];
+        l_sum[10+j*9+7] = solnOpts_.momAlgTauSymmetry_[j];
+        l_sum[10+j*9+8] = solnOpts_.momAlgTauOpen_[j];
     }
     stk::ParallelMachine comm = NaluEnv::self().parallel_comm();
     stk::all_reduce_sum(comm, l_sum.data(), g_sum.data(), (1+nDim)*3);
@@ -116,10 +150,23 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     solnOpts_.keAlgAccumulation_ = g_sum[0];
     solnOpts_.keAlgInflow_ =  g_sum[1];
     solnOpts_.keAlgOpen_ =  g_sum[2];
+    solnOpts_.keAlgPressureInflow_ = g_sum[3];
+    solnOpts_.keAlgPressureSymmetry_ = g_sum[4]; //Has to be zero
+    solnOpts_.keAlgPressureOpen_ = g_sum[5];  
+    solnOpts_.keAlgTauInflow_ = g_sum[6];
+    solnOpts_.keAlgTauSymmetry_ = g_sum[7];  
+    solnOpts_.keAlgTauOpen_ = g_sum[8];  
+    solnOpts_.keAlgDissipation_ = g_sum[9];  
     for(int j=0; j<nDim; j++) {
-        solnOpts_.momAlgAccumulation_[j] = g_sum[3+3*j];
-        solnOpts_.momAlgInflow_[j] = g_sum[3+3*j+1];
-        solnOpts_.momAlgOpen_[j] = g_sum[3+3*j+2];
+        solnOpts_.momAlgAccumulation_[j] = g_sum[10+9*j];
+        solnOpts_.momAlgInflow_[j] = g_sum[10+9*j+1];
+        solnOpts_.momAlgOpen_[j] = g_sum[10+9*j+2];
+        solnOpts_.momAlgPressureInflow_[j] = g_sum[10+9*j+3];
+        solnOpts_.momAlgPressureSymmetry_[j] = g_sum[10+9*j+4]; 
+        solnOpts_.momAlgPressureOpen_[j] = g_sum[10+9*j+5];
+        solnOpts_.momAlgTauInflow_[j] = g_sum[10+9*j+6];
+        solnOpts_.momAlgTauSymmetry_[j] = g_sum[10+9*j+7];
+        solnOpts_.momAlgTauOpen_[j] = g_sum[10+9*j+8];
     }
 
     provide_output();
@@ -301,6 +348,150 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
 
 }
 
+//--------------------------------------------------------------------------
+//-------- compute_dissipation ---------------------------------------------
+//--------------------------------------------------------------------------
+double 
+ComputeMomKEFluxAlgorithmDriver::compute_dissipation()
+{
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  const int nDim = metaData.spatial_dimension();
+
+  // initialize accumulation term to zero
+  double ke_dissipation = 0.0;
+  
+  // extract fields
+  GenericFieldType *dudx = metaData.get_field<GenericFieldType>(stk::topology::NODE_RANK, "dudx");
+
+  const std::string viscName = realm_.is_turbulent()
+    ? "effective_viscosity_u" : "viscosity";
+  ScalarFieldType *viscosity = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName);
+  
+  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(
+      stk::topology::NODE_RANK, "velocity");
+  VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
+  VectorFieldType *coordinates = metaData.get_field<VectorFieldType>(
+    stk::topology::NODE_RANK, solnOpts_.get_coordinates_name());
+
+  //  required space
+  std::vector<double> ws_shape_function;
+  std::vector<double> ws_viscosity;
+  std::vector<double> ws_velNp1;  
+  std::vector<double> ws_dudx;  
+  std::vector<double> ws_coordinates;
+  std::vector<double> ws_scv_volume;
+
+  // selector (everywhere density lives, locally owned and active) 
+  stk::mesh::Selector s_locally_owned = stk::mesh::selectField(*velocity)    
+    & !(realm_.get_inactive_selector());
+
+  stk::mesh::BucketVector const& elem_buckets =
+    realm_.get_buckets( stk::topology::ELEMENT_RANK, s_locally_owned);
+  
+  for ( stk::mesh::BucketVector::const_iterator ib = elem_buckets.begin() ;
+        ib != elem_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+
+    // extract master element
+    MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(b.topology());
+
+    // extract master element specifics
+    const int nodesPerElement = meSCV->nodesPerElement_;
+    const int numScvIp = meSCV->numIntPoints_;
+
+    // resize
+    ws_shape_function.resize(numScvIp*nodesPerElement);
+    ws_viscosity.resize(nodesPerElement);
+    ws_velNp1.resize(nodesPerElement*nDim);
+    ws_dudx.resize(nodesPerElement*nDim*nDim);    
+    ws_coordinates.resize(nDim*nodesPerElement);
+    ws_scv_volume.resize(numScvIp);
+    
+    if ( lumpedMass_ )
+      meSCV->shifted_shape_fcn(&ws_shape_function[0]);
+    else
+      meSCV->shape_fcn(&ws_shape_function[0]);
+
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+
+      //===============================================
+      // gather nodal data; this is how we do it now..
+      //===============================================
+      stk::mesh::Entity const *  node_rels = b.begin_nodes(k);
+      int num_nodes = b.num_nodes(k);
+
+      // sanity check on num nodes
+      ThrowAssert( num_nodes == nodesPerElement );
+
+      for ( int ni = 0; ni < num_nodes; ++ni ) {
+        stk::mesh::Entity node = node_rels[ni];
+
+        // pointers to real data
+        const double * coords = stk::mesh::field_data(*coordinates, node );
+
+        // gather vectors
+        const int niNdim = ni*nDim;
+        const int niNNdim = ni*nDim+nDim;
+
+        const double * uNp1 = stk::mesh::field_data(velocityNp1, node);
+        const double * dudxNp1 = stk::mesh::field_data(*dudx, node);
+        ws_viscosity[ni] = *stk::mesh::field_data(*viscosity, node);
+        for ( int j=0; j < nDim; ++j ) {
+            ws_velNp1[niNdim+j]  = uNp1[j];
+            for ( int k=0; k < nDim; ++k) {
+                ws_dudx[niNNdim+j*nDim+k] = dudxNp1[j*nDim+k];
+            }
+        }
+        
+        for ( int j=0; j < nDim; ++j ) {
+          ws_coordinates[niNdim+j] = coords[j];
+        }
+      }
+
+      // compute geometry
+      double scv_error = 0.0;
+      meSCV->determinant(1, &ws_coordinates[0], &ws_scv_volume[0], &scv_error);
+
+      for ( int ip = 0; ip < numScvIp; ++ip ) {
+
+        // zero out;
+        std::vector<double> dudxScv(nDim*nDim,0.0);
+        std::vector<double> velNp1Scv(nDim,0.0);
+        double viscScv = 0.0;
+        
+        const int offSet = ip*nodesPerElement;
+        for ( int ic = 0; ic < nodesPerElement; ++ic ) {
+          // save off shape function
+          const double r = ws_shape_function[offSet+ic];
+          viscScv += r*ws_viscosity[ic];
+          for ( int j=0; j < nDim; ++j ) {
+              velNp1Scv[j] += r*ws_velNp1[ic*nDim+j];
+              for (int k=0; k < nDim; ++k) {
+                  dudxScv[ic*nDim*nDim+j*nDim+k] += r*ws_dudx[ic*nDim*nDim+j*nDim+k];
+              }
+          }
+        }
+
+        double Pk = 0.0;
+        for ( int i = 0; i < nDim; ++i ) {
+            const int offSet = nDim*i;
+            for ( int j = 0; j < nDim; ++j ) {
+                Pk += dudxScv[offSet+j]*(dudxScv[offSet+j] + dudxScv[nDim*j+i]);
+            }
+        }
+        Pk *= viscScv;
+
+        ke_dissipation +=  Pk*ws_scv_volume[ip];
+        
+      }
+    }
+  }
+
+  return ke_dissipation;
+
+}
 
 //--------------------------------------------------------------------------
 //-------- provide_output -----------------------------------------------
@@ -315,34 +506,39 @@ ComputeMomKEFluxAlgorithmDriver::provide_output()
     // output momentum closure
     std::vector<double> totalMomClosure(nDim,0.0);
     for(int j=0; j<nDim; j++) {
-        totalMomClosure[j] = solnOpts_.momAlgAccumulation_[j] + solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j];
+        totalMomClosure[j] = solnOpts_.momAlgAccumulation_[j] + solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j] + solnOpts_.momAlgPressureInflow_[j] + solnOpts_.momAlgPressureSymmetry_[j] + solnOpts_.momAlgPressureOpen_[j] + solnOpts_.momAlgTauInflow_[j] + solnOpts_.momAlgTauSymmetry_[j] + solnOpts_.momAlgTauOpen_[j];
     }
     NaluEnv::self().naluOutputP0() << "Momentum Balance Review:  " << std::endl;
     NaluEnv::self().naluOutputP0() << "  Momentum accumulation: " ;
     for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << solnOpts_.momAlgAccumulation_[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
     
-    NaluEnv::self().naluOutputP0() << "  Integrated inflow:      " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgInflow_[j] << " " ;
+    NaluEnv::self().naluOutputP0() << "  Total momentum flux:      " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j]  << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
 
-    NaluEnv::self().naluOutputP0() << "  Integrated open:      " ;
-    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (16) << solnOpts_.momAlgOpen_[j] << " " ;
+    NaluEnv::self().naluOutputP0() << "  Total pressure force:   " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << solnOpts_.momAlgPressureInflow_[j] + solnOpts_.momAlgPressureSymmetry_[j] + solnOpts_.momAlgPressureOpen_[j] << " " ;
+    NaluEnv::self().naluOutputP0() << std::endl;
+
+    NaluEnv::self().naluOutputP0() << "  Total viscous/turbulent force:   " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << solnOpts_.momAlgTauInflow_[j] + solnOpts_.momAlgTauSymmetry_[j] + solnOpts_.momAlgTauOpen_[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
 
     NaluEnv::self().naluOutputP0() << "  Total momentum closure:   " ;
     for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << totalMomClosure[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
     
+    // output kinetic energy closure
+    const double totalKEClosure = solnOpts_.keAlgAccumulation_ + solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_+ solnOpts_.keAlgPressureInflow_ + solnOpts_.keAlgPressureSymmetry_ + solnOpts_.keAlgPressureOpen_ + solnOpts_.keAlgTauInflow_ + solnOpts_.keAlgTauSymmetry_ + solnOpts_.keAlgTauOpen_ + solnOpts_.keAlgDissipation_ ;
+    NaluEnv::self().naluOutputP0() << "Kinetic Energy Balance Review:  " << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Energy accumulation: " << solnOpts_.keAlgAccumulation_ << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Total momentum flux:      " << std::setprecision (16) << solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_<< std::endl;
+    NaluEnv::self().naluOutputP0() << "  Total pressure work:   " << std::setprecision (6) << solnOpts_.keAlgPressureInflow_ + solnOpts_.keAlgPressureSymmetry_ + solnOpts_.keAlgPressureOpen_ << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Total viscous work:   " << std::setprecision (6) << solnOpts_.keAlgTauInflow_ + solnOpts_.keAlgTauSymmetry_ + solnOpts_.keAlgTauOpen_ << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Viscous/turbulent dissipation:   " << std::setprecision (6) << solnOpts_.keAlgDissipation_ << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Total kinetic energy closure:   " << std::setprecision (6) << totalKEClosure << std::endl;
     
-  // output kinetic energy closure
-    const double totalKEClosure = solnOpts_.keAlgAccumulation_ + solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_;
-  NaluEnv::self().naluOutputP0() << "Kinetic Energy Balance Review:  " << std::endl;
-  NaluEnv::self().naluOutputP0() << "  Energy accumulation: " << solnOpts_.keAlgAccumulation_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "  Integrated inflow:      " << std::setprecision (16) << solnOpts_.keAlgInflow_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "  Integrated open:      " << std::setprecision (16) << solnOpts_.keAlgOpen_ << std::endl;
-  NaluEnv::self().naluOutputP0() << "  Total energy closure:   " << std::setprecision (6) << totalKEClosure << std::endl;
-  
 }
 
 } // namespace nalu

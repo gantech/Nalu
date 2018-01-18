@@ -158,11 +158,24 @@ public:
   std::vector<double> momAlgAccumulation_;
   std::vector<double> momAlgInflow_;
   std::vector<double> momAlgOpen_;
+  std::vector<double> momAlgPressureInflow_;
+  std::vector<double> momAlgPressureSymmetry_; 
+  std::vector<double> momAlgPressureOpen_;
+  std::vector<double> momAlgTauInflow_;
+  std::vector<double> momAlgTauSymmetry_;
+  std::vector<double> momAlgTauOpen_;
 
   // kinetic energy post processing
   double keAlgAccumulation_;
   double keAlgInflow_;
   double keAlgOpen_;  
+  double keAlgPressureInflow_;
+  double keAlgPressureSymmetry_; //Has to be zero
+  double keAlgPressureOpen_;  
+  double keAlgTauInflow_;
+  double keAlgTauSymmetry_;  
+  double keAlgTauOpen_;  
+  double keAlgDissipation_; 
 
   // turbulence model coeffs
   std::map<TurbulenceModelConstant, double> turbModelConstantMap_;

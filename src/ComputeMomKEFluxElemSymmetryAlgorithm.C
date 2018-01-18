@@ -7,13 +7,14 @@
 
 
 // nalu
-#include "ComputeMomKEFluxElemOpenAlgorithm.h"
-#include "Algorithm.h"
-
-#include "FieldTypeDef.h"
-#include "Realm.h"
-#include "SolutionOptions.h"
-#include "master_element/MasterElement.h"
+#include <ComputeMomKEFluxElemSymmetryAlgorithm.h>
+#include <EquationSystem.h>
+#include <FieldTypeDef.h>
+#include <LinearSystem.h>
+#include <Realm.h>
+#include <SolutionOptions.h>
+#include <TimeIntegrator.h>
+#include <master_element/MasterElement.h>
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -29,43 +30,33 @@ namespace nalu{
 //==========================================================================
 // Class Definition
 //==========================================================================
-// ComputeMomKEFluxElemOpenAlgorithm - mdot continuity open bc
+// ComputeMomKEFluxElemSymmetryAlgorithm - DOCUMENTATION HERE
 //==========================================================================
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
-ComputeMomKEFluxElemOpenAlgorithm::ComputeMomKEFluxElemOpenAlgorithm(
+ComputeMomKEFluxElemSymmetryAlgorithm::ComputeMomKEFluxElemSymmetryAlgorithm(
   Realm &realm,
   stk::mesh::Part *part)
   : Algorithm(realm, part),
-    includeDivU_(realm_.get_divU()),
-    meshMotion_(realm_.does_mesh_move()),
-    velocity_(NULL),
-    exposedAreaVec_(NULL),
-    openMassFlowRate_(NULL),    
-    shiftMomKEFlux_(realm_.get_cvfem_shifted_mdot())
+    includeDivU_(realm_.get_divU())
 {
   // save off fields
   stk::mesh::MetaData & meta_data = realm_.meta_data();
   velocity_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
+  coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
+  const std::string viscName = realm.is_turbulent()
+    ? "effective_viscosity_u" : "viscosity";
+  viscosity_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, viscName);
   exposedAreaVec_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "exposed_area_vector");
-  openMassFlowRate_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "open_mass_flow_rate");
-}
-
-//--------------------------------------------------------------------------
-//-------- destructor ------------------------------------------------------
-//--------------------------------------------------------------------------
-ComputeMomKEFluxElemOpenAlgorithm::~ComputeMomKEFluxElemOpenAlgorithm()
-{
-  // does nothing
 }
 
 //--------------------------------------------------------------------------
 //-------- execute ---------------------------------------------------------
 //--------------------------------------------------------------------------
 void
-ComputeMomKEFluxElemOpenAlgorithm::execute()
+ComputeMomKEFluxElemSymmetryAlgorithm::execute()
 {
 
   stk::mesh::BulkData & bulk_data = realm_.bulk_data();
@@ -73,53 +64,47 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
 
   const int nDim = meta_data.spatial_dimension();
   
-  // extract noc
-  const std::string dofName = "pressure";
+  // extract user options (allow to potentially change over time)
+  const std::string dofName = "velocity";
   const bool useShiftedGradOp = realm_.get_shifted_grad_op(dofName);
+ 
   std::vector<stk::mesh::Entity> connected_nodes;
-  
-  // ip values; both boundary and opposing surface
-  std::vector<double> uBip(nDim);
-  double pressureBip, viscBip ;
+
+  // vectors
   std::vector<double> nx(nDim);
-  
+
   // pointers to fixed values
-  double *p_uBip = &uBip[0];
   double *p_nx = &nx[0];
 
   // nodal fields to gather
-  std::vector<double> ws_coordinates;  
-  std::vector<double> ws_velocity_face;
-  std::vector<double> ws_velocity_elem;  
+  std::vector<double> ws_velocityNp1;
+  std::vector<double> ws_coordinates;
   std::vector<double> ws_viscosity;
   std::vector<double> ws_pressure;
-  
   // master element
   std::vector<double> ws_face_shape_function;
   std::vector<double> ws_dndx;
   std::vector<double> ws_det_j;
 
-  // deal with interpolation procedure
-  const double interpTogether = realm_.get_mdot_interp();
-  const double om_interpTogether = 1.0-interpTogether;
-
   // set accumulation variables
-  double keflux_open = 0.0;
-  std::vector<double> momflux_open(nDim, 0.0);
-  double keFlux_PressureOpen = 0.0;
-  std::vector<double> momFlux_PressureOpen(nDim, 0.0);
-  double keFlux_TauOpen = 0.0;
-  std::vector<double> momFlux_TauOpen(nDim, 0.0);
+  double keflux_symmetry = 0.0;
+  std::vector<double> momflux_symmetry(nDim, 0.0);
+  double keFlux_PressureSymmetry = 0.0;
+  std::vector<double> momFlux_PressureSymmetry(nDim, 0.0);
+  double keFlux_TauSymmetry = 0.0;
+  std::vector<double> momFlux_TauSymmetry(nDim, 0.0);
 
   // deal with state
   VectorFieldType &velocityNp1 = velocity_->field_of_state(stk::mesh::StateNP1);
 
   // define vector of parent topos; should always be UNITY in size
   std::vector<stk::topology> parentTopo;
-  
+
   // define some common selectors
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
-    &stk::mesh::selectUnion(partVec_);
+    &stk::mesh::selectUnion(partVec_)
+    &!(realm_.get_inactive_selector());
+
   stk::mesh::BucketVector const& face_buckets =
     realm_.get_buckets( meta_data.side_rank(), s_locally_owned_union );
   for ( stk::mesh::BucketVector::const_iterator ib = face_buckets.begin();
@@ -134,41 +119,37 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
     // volume master element
     MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(theElemTopo);
     const int nodesPerElement = meSCS->nodesPerElement_;
-    const int numScsIp = meSCS->numIntPoints_;
-    
+
     // face master element
     MasterElement *meFC = sierra::nalu::MasterElementRepo::get_surface_master_element(b.topology());
-    const int nodesPerFace = b.topology().num_nodes();
+    const int nodesPerFace = meFC->nodesPerElement_;
     const int numScsBip = meFC->numIntPoints_;
 
+    // resize some things; matrix related
+    connected_nodes.resize(nodesPerElement);
+
     // algorithm related; element
-    ws_velocity_elem.resize(nodesPerElement*nDim);
+    ws_velocityNp1.resize(nodesPerElement*nDim);
     ws_coordinates.resize(nodesPerElement*nDim);
+    ws_viscosity.resize(nodesPerFace);
+    ws_pressure.resize(nodesPerFace);
+    ws_face_shape_function.resize(numScsBip*nodesPerFace);
     ws_dndx.resize(nDim*numScsBip*nodesPerElement);
     ws_det_j.resize(numScsBip);
 
-    ws_velocity_face.resize(nodesPerFace*nDim);
-    ws_pressure.resize(nodesPerFace);
-    ws_viscosity.resize(nodesPerFace);
-    ws_face_shape_function.resize(numScsBip*nodesPerFace);
-
     // pointers
-    double *p_velocity_elem = &ws_velocity_elem[0];    
-
+    double *p_velocityNp1 = &ws_velocityNp1[0];
     double *p_coordinates = &ws_coordinates[0];
-    double *p_dndx = &ws_dndx[0];
-    double *p_velocity_face = &ws_velocity_face[0];
-    double *p_viscosity = &ws_viscosity[0];    
+    double *p_viscosity = &ws_viscosity[0];
     double *p_pressure = &ws_pressure[0];
     double *p_face_shape_function = &ws_face_shape_function[0];
+    double *p_dndx = &ws_dndx[0];
 
-    // shape functions; boundary
-    if ( shiftMomKEFlux_ )
-      meFC->shifted_shape_fcn(&p_face_shape_function[0]);
-    else
-      meFC->shape_fcn(&p_face_shape_function[0]);
-    
+    // shape function
+    meFC->shape_fcn(&p_face_shape_function[0]);
+
     const stk::mesh::Bucket::size_type length   = b.size();
+
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
       // get face
@@ -183,18 +164,13 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
       ThrowAssert( num_face_nodes == nodesPerFace );
       for ( int ni = 0; ni < num_face_nodes; ++ni ) {
         stk::mesh::Entity node = face_node_rels[ni];
-        double * velocity = stk::mesh::field_data(velocityNp1, node);
-        const int offSet = ni*nDim;
-        for ( int j=0; j < nDim; ++j ) {
-            p_velocity_face[offSet+j] = velocity[j];
-        }
+        // gather scalars
         p_pressure[ni] = *stk::mesh::field_data(*pressure_, node);
         p_viscosity[ni] = *stk::mesh::field_data(*viscosity_, node);
       }
 
       // pointer to face data
       const double * areaVec = stk::mesh::field_data(*exposedAreaVec_, face);
-      double * mdot = stk::mesh::field_data(*openMassFlowRate_, face);
 
       // extract the connected element to this exposed face; should be single in size!
       stk::mesh::Entity const * face_elem_rels = bulk_data.begin_elements(face);
@@ -224,7 +200,7 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
         double * coords = stk::mesh::field_data(*coordinates_, node);
         const int offSet = ni*nDim;
         for ( int j=0; j < nDim; ++j ) {
-          p_velocity_elem[offSet+j] = uNp1[j];
+          p_velocityNp1[offSet+j] = uNp1[j];
           p_coordinates[offSet+j] = coords[j];
         }
       }
@@ -244,123 +220,83 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
         // offset for bip area vector and types of shape function
         const int faceOffSet = ip*nDim;
         const int offSetSF_face = ip*nodesPerFace;
-        
+
         // form unit normal
         double asq = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
-            const double axj = areaVec[faceOffSet+j];
-            asq += axj*axj;
+          const double axj = areaVec[faceOffSet+j];
+          asq += axj*axj;
         }
         const double amag = std::sqrt(asq);
         for ( int i = 0; i < nDim; ++i ) {
-            p_nx[i] = areaVec[faceOffSet+i]/amag;
+          p_nx[i] = areaVec[faceOffSet+i]/amag;
         }
-          
-        // zero out vector quantities
-        for ( int j = 0; j < nDim; ++j ) {
-          p_uBip[j] = 0.0;
-        }
-        pressureBip = 0.0;
-        viscBip = 0.0;
+
         // interpolate to bip
+        double viscBip = 0.0;
+        double pressureBip = 0.0;
         for ( int ic = 0; ic < nodesPerFace; ++ic ) {
           const double r = p_face_shape_function[offSetSF_face+ic];
-          pressureBip += r*p_pressure[ic];
-          viscBip += r*p_viscosity[ic];          
-          const int offSetFN = ic*nDim;
-          for ( int j = 0; j < nDim; ++j ) {
-            p_uBip[j] += r*p_velocity_face[offSetFN+j];
-          }
+          viscBip += r*p_viscosity[ic];
+          pressureBip += r*p_pressure[ic];          
         }
 
-        // scatter to mdot and accumulate
-        double ke_Bip = 0.0;
         for(int j = 0; j < nDim; ++j) {
-            ke_Bip += p_uBip[j] * p_uBip[j] ;
-            momflux_open[j] += mdot[ip] * p_uBip[j] ;
-            momFlux_PressureOpen[j] += pressureBip  * areaVec[ip*nDim+j] ;
+            momFlux_PressureSymmetry[j] += pressureBip  * areaVec[ip*nDim+j] ;
         }
-        keflux_open += 0.5 * mdot[ip] * ke_Bip;
-        keFlux_PressureOpen -= pressureBip * mdot[ip];
+        
+        //================================
+        // diffusion second
+        //================================
+        for ( int ic = 0; ic < nodesPerElement; ++ic ) {
 
-      //================================
-      // diffusion second
-      //================================
-      for ( int ic = 0; ic < nodesPerElement; ++ic ) {
-          
           const int offSetDnDx = nDim*nodesPerElement*ip + ic*nDim;
-          
+
           for ( int j = 0; j < nDim; ++j ) {
-              
-              const double axj = areaVec[faceOffSet+j];
-              const double dndxj = p_dndx[offSetDnDx+j];
-              const double uxj = p_velocity_elem[ic*nDim+j];
-              
-              const double divUstress = 2.0/3.0*viscBip*dndxj*uxj*axj*includeDivU_;
-              
-              for ( int i = 0; i < nDim; ++i ) {
-                  
-                  // matrix entries
-                  int indexR = nearestNode*nDim + i;
-                  int rowR = indexR*nodesPerElement*nDim;
-                  
-                  const double dndxi = p_dndx[offSetDnDx+i];
-                  const double uxi = p_velocity_elem[ic*nDim+i];
-                  const double nxi = p_nx[i];
-                  const double om_nxinxi = 1.0-nxi*nxi;
-                 
-                  // -mu*dui/dxj*Aj; sneak in divU (explicit)
-                  double lhsfac = -viscBip*dndxj*axj*om_nxinxi;
-                  keFlux_TauOpen -= (lhsfac*uxi + divUstress*om_nxinxi)*uxi;
-                  momFlux_TauOpen[j] -= lhsfac*uxi + divUstress*om_nxinxi;
-                  
-                  // -mu*duj/dxi*Aj
-                  lhsfac = -viscBip*dndxi*axj*om_nxinxi;
-                  keFlux_TauOpen -= (lhsfac*uxj)*uxi;
-                  momFlux_TauOpen[j] -= lhsfac*uxj ;
 
-                  // now we need the -nx*ny*Fy - nx*nz*Fz part
-                  for ( int l = 0; l < nDim; ++l ) {
+            const double axj = areaVec[faceOffSet+j];
+            const double dndxj = p_dndx[offSetDnDx+j];
+            const double uxj = p_velocityNp1[ic*nDim+j];
 
-                      if ( i != l ) {
-                          const double nxinxl = nxi*p_nx[l];
-                          const double uxl = p_velocity_elem[ic*nDim+l];
-                          const double dndxl = p_dndx[offSetDnDx+l];
+            const double divUstress = 2.0/3.0*viscBip*dndxj*uxj*axj*includeDivU_;
 
-                          // +ni*nl*mu*dul/dxj*Aj; sneak in divU (explicit)
-                          lhsfac = viscBip*dndxj*axj*nxinxl;                          
-                          keFlux_TauOpen -= (lhsfac*uxl + divUstress*nxinxl)*uxl;
-                          momFlux_TauOpen[j] -= lhsfac*uxl + divUstress*nxinxl;
-                  
-                          // +ni*nl*mu*duj/dxl*Aj
-                          lhsfac = viscBip*dndxl*axj*nxinxl;
-                          keFlux_TauOpen -= (lhsfac*uxj)*uxl;
-                          momFlux_TauOpen[j] -= lhsfac*uxj ;
-                      }
-                  }
-                  
-              }
+            for ( int i = 0; i < nDim; ++i ) {
+
+              // matrix entries
+              int indexR = nearestNode*nDim + i;
+              int rowR = indexR*nodesPerElement*nDim;
+
+              const double dndxi = p_dndx[offSetDnDx+i];
+              const double uxi = p_velocityNp1[ic*nDim+i];
+              const double nxi = p_nx[i];
+              const double nxinxi = nxi*nxi;
+
+              // -mu*dui/dxj*Aj*ni*ni; sneak in divU (explicit)
+              double lhsfac = -viscBip*dndxj*axj*nxinxi;
+              keFlux_TauSymmetry -= (lhsfac*uxi + divUstress*nxinxi)*uxi;
+              momFlux_TauSymmetry[j] -= lhsfac*uxi + divUstress*nxinxi;
+              
+              // -mu*duj/dxi*Aj*ni*ni
+              lhsfac = -viscBip*dndxi*axj*nxinxi;
+              keFlux_TauSymmetry -= (lhsfac*uxj)*uxi;
+              momFlux_TauSymmetry[j] -= lhsfac*uxj ;
+
+            }
           }
+        }
       }
 
-      }      
+      // scatter back to solution options; not thread safe
+      realm_.solutionOptions_->keAlgTauSymmetry_ += keFlux_TauSymmetry;
+      for(int j = 0; j < nDim; ++j) 
+          realm_.solutionOptions_->momAlgTauSymmetry_[j] += momFlux_TauSymmetry[j];
+
+      for(int j = 0; j < nDim; ++j) 
+          realm_.solutionOptions_->momAlgPressureSymmetry_[j] += momFlux_PressureSymmetry[j];
+      
     }
   }
-  // scatter back to solution options; not thread safe
-  realm_.solutionOptions_->keAlgOpen_ += keflux_open;
-  for(int j = 0; j < nDim; ++j) 
-    realm_.solutionOptions_->momAlgOpen_[j] += momflux_open[j];
-
-  realm_.solutionOptions_->keAlgPressureOpen_ += keFlux_PressureOpen;
-  for(int j = 0; j < nDim; ++j) 
-      realm_.solutionOptions_->momAlgPressureOpen_[j] += momFlux_PressureOpen[j];
-
-  realm_.solutionOptions_->keAlgTauOpen_ += keFlux_TauOpen;
-  for(int j = 0; j < nDim; ++j) 
-      realm_.solutionOptions_->momAlgTauOpen_[j] += momFlux_TauOpen[j];
-  
-  
 }
-    
+
 } // namespace nalu
 } // namespace Sierra

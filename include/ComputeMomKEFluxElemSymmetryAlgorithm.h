@@ -6,8 +6,8 @@
 /*------------------------------------------------------------------------*/
 
 
-#ifndef ComputeMomKEFluxInflowAlgorithm_h
-#define ComputeMomKEFluxInflowAlgorithm_h
+#ifndef ComputeMomKEFluxElemSymmetryAlgorithm_h
+#define ComputeMomKEFluxElemSymmetryAlgorithm_h
 
 #include<Algorithm.h>
 #include<FieldTypeDef.h>
@@ -20,27 +20,25 @@ namespace nalu{
 
 class Realm;
 
-class ComputeMomKEFluxInflowAlgorithm : public Algorithm
+class ComputeMomKEFluxElemSymmetryAlgorithm : public Algorithm
 {
 public:
 
-  ComputeMomKEFluxInflowAlgorithm(
+  ComputeMomKEFluxElemSymmetryAlgorithm(
     Realm &realm,
-    stk::mesh::Part *part,
-    bool useShifted);
-  ~ComputeMomKEFluxInflowAlgorithm();
+    stk::mesh::Part *part);
+  ~ComputeMomKEFluxElemSymmetryAlgorithm();
 
   void execute();
-  
+
   const double includeDivU_;
-  const bool useShifted_;
 
   VectorFieldType *coordinates_;
   VectorFieldType *velocity_;
-  ScalarFieldType *viscosity_;  
-  ScalarFieldType *density_;
-  ScalarFieldType *pressure_;
+  ScalarFieldType *viscosity_;
+  ScalarFieldType *pressure_;    
   GenericFieldType *exposedAreaVec_;
+
 };
 
 } // namespace nalu

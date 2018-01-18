@@ -28,7 +28,7 @@ public:
   ~ComputeMomKEFluxAlgorithmDriver();
 
   void compute_accumulation(std::vector<double> & , double &);
-  void compute_boundary_accumulation(std::vector<double> &, double &);
+  double compute_dissipation();
   void provide_output();
   
   SolutionOptions &solnOpts_;

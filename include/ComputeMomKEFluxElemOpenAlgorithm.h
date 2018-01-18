@@ -31,9 +31,13 @@ public:
 
   void execute();
 
+  const double includeDivU_;
   const bool meshMotion_;
 
+  VectorFieldType *coordinates_;
   VectorFieldType *velocity_;
+  ScalarFieldType *pressure_;
+  ScalarFieldType *viscosity_;  
   GenericFieldType *exposedAreaVec_;
   GenericFieldType *openMassFlowRate_;
 
