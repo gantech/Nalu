@@ -28,6 +28,7 @@ public:
   ~ComputeMomKEFluxAlgorithmDriver();
 
   void compute_accumulation(std::vector<double> & , double &);
+  void compute_act_source_force_work(std::vector<double> & , double &);  
   double compute_dissipation();
   void provide_output();
   

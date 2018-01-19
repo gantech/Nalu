@@ -166,6 +166,7 @@ public:
   std::vector<double> momAlgTauSymmetry_;
   std::vector<double> momAlgTauWall_;    
   std::vector<double> momAlgTauOpen_;
+  std::vector<double> momAlgActSource_;  
 
   // kinetic energy post processing
   double keAlgAccumulation_;
@@ -178,7 +179,8 @@ public:
   double keAlgTauSymmetry_;  
   double keAlgTauOpen_;
   double keAlgTauWall_;    
-  double keAlgDissipation_; 
+  double keAlgDissipation_;
+  double keAlgActSourceWork_;
 
   // turbulence model coeffs
   std::map<TurbulenceModelConstant, double> turbModelConstantMap_;
