@@ -49,6 +49,8 @@
 #include <ComputeMomKEFluxAlgorithmDriver.h>
 #include <ComputeMomKEFluxInflowAlgorithm.h>
 #include <ComputeMomKEFluxElemOpenAlgorithm.h>
+#include <ComputeMomKEFluxElemSymmetryAlgorithm.h>
+#include <ComputeMomKEFluxElemWallAlgorithm.h>
 #include <ComputeWallFrictionVelocityAlgorithm.h>
 #include <ComputeABLWallFrictionVelocityAlgorithm.h>
 #include <ConstantAuxFunction.h>
@@ -2796,6 +2798,17 @@ ContinuityEquationSystem::register_wall_bc(
       it->second->partVec_.push_back(part);
     }
   }
+
+  std::map<AlgorithmType, Algorithm *>::iterator it
+      = computeMomKEFluxAlgDriver_->algMap_.find(algType);
+  if ( it == computeMomKEFluxAlgDriver_->algMap_.end() ) {
+      Algorithm *theAlg = new ComputeMomKEFluxElemWallAlgorithm(realm_, part);
+      computeMomKEFluxAlgDriver_->algMap_[algType] = theAlg;
+  }
+  else {
+      it->second->partVec_.push_back(part);
+  }
+  
 }
 
 //--------------------------------------------------------------------------
@@ -2826,6 +2839,17 @@ ContinuityEquationSystem::register_symmetry_bc(
       it->second->partVec_.push_back(part);
     }
   }
+
+  std::map<AlgorithmType, Algorithm *>::iterator it
+      = computeMomKEFluxAlgDriver_->algMap_.find(algType);
+  if ( it == computeMomKEFluxAlgDriver_->algMap_.end() ) {
+      Algorithm *theAlg = new ComputeMomKEFluxElemSymmetryAlgorithm(realm_, part);
+      computeMomKEFluxAlgDriver_->algMap_[algType] = theAlg;
+  }
+  else {
+      it->second->partVec_.push_back(part);
+  }
+  
 }
 
 //--------------------------------------------------------------------------
