@@ -45,6 +45,7 @@ ComputeMomKEFluxInflowAlgorithm::ComputeMomKEFluxInflowAlgorithm(
 {
   // save off fields
   stk::mesh::MetaData & meta_data = realm_.meta_data();
+  coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   velocity_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
   const std::string viscName = realm.is_turbulent()
       ? "effective_viscosity_u" : "viscosity";
@@ -143,10 +144,12 @@ ComputeMomKEFluxInflowAlgorithm::execute()
     // algorithm related
     ws_velocity_elem.resize(nodesPerElement*nDim);
     ws_coordinates.resize(nodesPerElement*nDim);
+    connected_nodes.resize(nodesPerElement);
     ws_dndx.resize(nDim*numScsBip*nodesPerElement);
     ws_det_j.resize(numScsBip);
     
     ws_pressure.resize(nodesPerFace);
+    ws_viscosity.resize(nodesPerFace);    
     ws_density.resize(nodesPerFace);
     ws_velocity_face.resize(nodesPerFace*nDim);
     ws_shape_function.resize(numScsIp*nodesPerElement);
