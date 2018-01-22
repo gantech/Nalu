@@ -129,8 +129,8 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     
     // parallel communicate
     std::vector<double> l_sum, g_sum;
-    l_sum.resize((1+nDim)*3);
-    g_sum.resize((1+nDim)*3);
+    l_sum.resize((1+nDim)*12);
+    g_sum.resize((1+nDim)*12);
     l_sum[0] = ke_accumulation;
     l_sum[1] = solnOpts_.keAlgInflow_;
     l_sum[2] = solnOpts_.keAlgOpen_ ;
