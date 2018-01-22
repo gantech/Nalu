@@ -119,12 +119,13 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     const int nDim = metaData.spatial_dimension();
 
     // compute d(rho * u * u)/dt * scv * dt
-    double ke_accumulation;
-    std::vector<double> mom_accumulation(nDim);
+    double ke_accumulation = 0.0;
+    std::vector<double> mom_accumulation(nDim,0.0);
     compute_accumulation(mom_accumulation, ke_accumulation);
-    double ke_dissipation = compute_dissipation();
-    double act_source_work;
-    std::vector<double> act_source_force(nDim);
+    double ke_dissipation = 0.0;
+    ke_dissipation = compute_dissipation();
+    double act_source_work = 0.0;
+    std::vector<double> act_source_force(nDim,0.0);
     compute_act_source_force_work(act_source_force, act_source_work);
     
     // parallel communicate
@@ -141,8 +142,8 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     l_sum[7] = solnOpts_.keAlgTauSymmetry_;  
     l_sum[8] = solnOpts_.keAlgTauWall_;
     l_sum[9] = solnOpts_.keAlgTauOpen_;  
-    l_sum[10] = solnOpts_.keAlgDissipation_;  
-    l_sum[11] = solnOpts_.keAlgActSourceWork_;  
+    l_sum[10] = ke_dissipation;
+    l_sum[11] = act_source_work;  
     
     for(int j=0; j<nDim; j++) {
         l_sum[12+j*11]   = mom_accumulation[j];
@@ -156,7 +157,7 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
         l_sum[12+j*12+8] = solnOpts_.momAlgTauSymmetry_[j];
         l_sum[12+j*12+9] = solnOpts_.momAlgTauWall_[j];
         l_sum[12+j*12+10] = solnOpts_.momAlgTauOpen_[j];
-        l_sum[12+j*12+11] = solnOpts_.momAlgActSource_[j];                
+        l_sum[12+j*12+11] = act_source_force[j];                
     }
     stk::ParallelMachine comm = NaluEnv::self().parallel_comm();
     stk::all_reduce_sum(comm, l_sum.data(), g_sum.data(), (1+nDim)*12);
@@ -489,7 +490,7 @@ ComputeMomKEFluxAlgorithmDriver::compute_dissipation()
           for ( int j=0; j < nDim; ++j ) {
               velNp1Scv[j] += r*ws_velNp1[ic*nDim+j];
               for (int k=0; k < nDim; ++k) {
-                  dudxScv[ic*nDim*nDim+j*nDim+k] += r*ws_dudx[ic*nDim*nDim+j*nDim+k];
+                  dudxScv[j*nDim+k] += r*ws_dudx[ic*nDim*nDim+j*nDim+k];
               }
           }
         }
