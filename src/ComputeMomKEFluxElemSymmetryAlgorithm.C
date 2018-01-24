@@ -158,6 +158,7 @@ ComputeMomKEFluxElemSymmetryAlgorithm::execute()
 
     const stk::mesh::Bucket::size_type length   = b.size();
 
+    NaluEnv::self().naluOutput() << "# Symmetry faces " << b.size() << std::endl;          
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
       // get face
@@ -219,7 +220,8 @@ ComputeMomKEFluxElemSymmetryAlgorithm::execute()
         meSCS->shifted_face_grad_op(1, face_ordinal, &p_coordinates[0], &p_dndx[0], &ws_det_j[0], &scs_error);
       else
         meSCS->face_grad_op(1, face_ordinal, &p_coordinates[0], &p_dndx[0], &ws_det_j[0], &scs_error);
-      
+
+
       // loop over boundary ips
       for ( int ip = 0; ip < numScsBip; ++ip ) {
 
@@ -250,7 +252,7 @@ ComputeMomKEFluxElemSymmetryAlgorithm::execute()
         }
 
         for(int j = 0; j < nDim; ++j) {
-            momFlux_PressureSymmetry[j] += pressureBip  * areaVec[ip*nDim+j] ;
+            momFlux_PressureSymmetry[j] -= pressureBip  * areaVec[ip*nDim+j] ;
         }
         
         //================================
@@ -294,16 +296,17 @@ ComputeMomKEFluxElemSymmetryAlgorithm::execute()
         }
       }
 
-      // scatter back to solution options; not thread safe
-      realm_.solutionOptions_->keAlgTauSymmetry_ += keFlux_TauSymmetry;
-      for(int j = 0; j < nDim; ++j) 
-          realm_.solutionOptions_->momAlgTauSymmetry_[j] += momFlux_TauSymmetry[j];
-
-      for(int j = 0; j < nDim; ++j) 
-          realm_.solutionOptions_->momAlgPressureSymmetry_[j] += momFlux_PressureSymmetry[j];
-      
     }
   }
+
+  // scatter back to solution options; not thread safe
+  realm_.solutionOptions_->keAlgTauSymmetry_ += keFlux_TauSymmetry;
+  for(int j = 0; j < nDim; ++j) 
+      realm_.solutionOptions_->momAlgTauSymmetry_[j] += momFlux_TauSymmetry[j];
+
+  for(int j = 0; j < nDim; ++j) 
+      realm_.solutionOptions_->momAlgPressureSymmetry_[j] += momFlux_PressureSymmetry[j];
+  
 }
 
 } // namespace nalu

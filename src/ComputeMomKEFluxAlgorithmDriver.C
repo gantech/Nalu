@@ -58,7 +58,8 @@ ComputeMomKEFluxAlgorithmDriver::ComputeMomKEFluxAlgorithmDriver(
     solnOpts_.momAlgTauSymmetry_.resize(nDim);
     solnOpts_.momAlgTauWall_.resize(nDim);
     solnOpts_.momAlgTauOpen_.resize(nDim);
-    solnOpts_.momAlgActSource_.resize(nDim);        
+    solnOpts_.momAlgActSource_.resize(nDim);
+    solnOpts_.momAlgTotMom_.resize(nDim);            
     
 }
 
@@ -87,7 +88,8 @@ ComputeMomKEFluxAlgorithmDriver::pre_work()
     solnOpts_.keAlgTauSymmetry_ = 0.0;  
     solnOpts_.keAlgTauOpen_ = 0.0;  
     solnOpts_.keAlgDissipation_ = 0.0;
-    solnOpts_.keAlgActSourceWork_ = 0.0;      
+    solnOpts_.keAlgActSourceWork_ = 0.0;
+    solnOpts_.keAlgTotTKE_ = 0.0;          
 
     stk::mesh::MetaData & metaData = realm_.meta_data();
     const int nDim = metaData.spatial_dimension();
@@ -103,7 +105,8 @@ ComputeMomKEFluxAlgorithmDriver::pre_work()
         solnOpts_.momAlgTauSymmetry_[j] = 0.0;
         solnOpts_.momAlgTauWall_[j] = 0.0;        
         solnOpts_.momAlgTauOpen_[j] = 0.0;
-        solnOpts_.momAlgActSource_[j] = 0.0;        
+        solnOpts_.momAlgActSource_[j] = 0.0;
+        solnOpts_.momAlgTotMom_[j] = 0.0;                
     }
 
 }
@@ -127,11 +130,14 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     double act_source_work = 0.0;
     std::vector<double> act_source_force(nDim,0.0);
     compute_act_source_force_work(act_source_force, act_source_work);
+    double tot_tke = 0.0;
+    std::vector<double> tot_mom(nDim,0.0);
+    compute_tot_mom_ke(tot_mom, tot_tke);
     
     // parallel communicate
     std::vector<double> l_sum, g_sum;
-    l_sum.resize((1+nDim)*12);
-    g_sum.resize((1+nDim)*12);
+    l_sum.resize((1+nDim)*13);
+    g_sum.resize((1+nDim)*13);
     l_sum[0] = ke_accumulation;
     l_sum[1] = solnOpts_.keAlgInflow_;
     l_sum[2] = solnOpts_.keAlgOpen_ ;
@@ -143,24 +149,26 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     l_sum[8] = solnOpts_.keAlgTauWall_;
     l_sum[9] = solnOpts_.keAlgTauOpen_;  
     l_sum[10] = ke_dissipation;
-    l_sum[11] = act_source_work;  
+    l_sum[11] = act_source_work;
+    l_sum[12] = tot_tke;      
     
     for(int j=0; j<nDim; j++) {
-        l_sum[12+j*11]   = mom_accumulation[j];
-        l_sum[12+j*12+1] = solnOpts_.momAlgInflow_[j];
-        l_sum[12+j*12+2] = solnOpts_.momAlgOpen_[j];
-        l_sum[12+j*12+3] = solnOpts_.momAlgPressureInflow_[j];
-        l_sum[12+j*12+4] = solnOpts_.momAlgPressureSymmetry_[j]; 
-        l_sum[12+j*12+5] = solnOpts_.momAlgPressureOpen_[j];
-        l_sum[12+j*12+6] = solnOpts_.momAlgPressureWall_[j];
-        l_sum[12+j*12+7] = solnOpts_.momAlgTauInflow_[j];
-        l_sum[12+j*12+8] = solnOpts_.momAlgTauSymmetry_[j];
-        l_sum[12+j*12+9] = solnOpts_.momAlgTauWall_[j];
-        l_sum[12+j*12+10] = solnOpts_.momAlgTauOpen_[j];
-        l_sum[12+j*12+11] = act_source_force[j];                
+        l_sum[13+j*13]   = mom_accumulation[j];
+        l_sum[13+j*13+1] = solnOpts_.momAlgInflow_[j];
+        l_sum[13+j*13+2] = solnOpts_.momAlgOpen_[j];
+        l_sum[13+j*13+3] = solnOpts_.momAlgPressureInflow_[j];
+        l_sum[13+j*13+4] = solnOpts_.momAlgPressureSymmetry_[j]; 
+        l_sum[13+j*13+5] = solnOpts_.momAlgPressureOpen_[j];
+        l_sum[13+j*13+6] = solnOpts_.momAlgPressureWall_[j];
+        l_sum[13+j*13+7] = solnOpts_.momAlgTauInflow_[j];
+        l_sum[13+j*13+8] = solnOpts_.momAlgTauSymmetry_[j];
+        l_sum[13+j*13+9] = solnOpts_.momAlgTauWall_[j];
+        l_sum[13+j*13+10] = solnOpts_.momAlgTauOpen_[j];
+        l_sum[13+j*13+11] = act_source_force[j];
+        l_sum[13+j*13+12] = tot_mom[j];                        
     }
     stk::ParallelMachine comm = NaluEnv::self().parallel_comm();
-    stk::all_reduce_sum(comm, l_sum.data(), g_sum.data(), (1+nDim)*12);
+    stk::all_reduce_sum(comm, l_sum.data(), g_sum.data(), (1+nDim)*13);
     
     // set parameters for later usage
     solnOpts_.keAlgAccumulation_ = g_sum[0];
@@ -174,20 +182,22 @@ ComputeMomKEFluxAlgorithmDriver::post_work()
     solnOpts_.keAlgTauWall_ = g_sum[8];
     solnOpts_.keAlgTauOpen_ = g_sum[9];  
     solnOpts_.keAlgDissipation_ = g_sum[10];
-    solnOpts_.keAlgActSourceWork_ = g_sum[11];      
+    solnOpts_.keAlgActSourceWork_ = g_sum[11];
+    solnOpts_.keAlgTotTKE_ = g_sum[12];
     for(int j=0; j<nDim; j++) {
-        solnOpts_.momAlgAccumulation_[j] = g_sum[12+j*12];
-        solnOpts_.momAlgInflow_[j] = g_sum[12+j*12+1];
-        solnOpts_.momAlgOpen_[j] = g_sum[12+j*12+2];
-        solnOpts_.momAlgPressureInflow_[j] = g_sum[12+j*12+3];
-        solnOpts_.momAlgPressureSymmetry_[j] = g_sum[12+j*12+4]; 
-        solnOpts_.momAlgPressureWall_[j] = g_sum[12+j*12+5];
-        solnOpts_.momAlgPressureOpen_[j] = g_sum[12+j*12+6];
-        solnOpts_.momAlgTauInflow_[j] = g_sum[12+j*12+7];
-        solnOpts_.momAlgTauSymmetry_[j] = g_sum[12+j*12+8];
-        solnOpts_.momAlgTauWall_[j] = g_sum[12+j*12+9];
-        solnOpts_.momAlgTauOpen_[j] = g_sum[12+j*12+10];
-        solnOpts_.momAlgActSource_[j] = g_sum[12+j*12+11];        
+        solnOpts_.momAlgAccumulation_[j] = g_sum[13+j*13];
+        solnOpts_.momAlgInflow_[j] = g_sum[13+j*13+1];
+        solnOpts_.momAlgOpen_[j] = g_sum[13+j*13+2];
+        solnOpts_.momAlgPressureInflow_[j] = g_sum[13+j*13+3];
+        solnOpts_.momAlgPressureSymmetry_[j] = g_sum[13+j*13+4]; 
+        solnOpts_.momAlgPressureWall_[j] = g_sum[13+j*13+5];
+        solnOpts_.momAlgPressureOpen_[j] = g_sum[13+j*13+6];
+        solnOpts_.momAlgTauInflow_[j] = g_sum[13+j*13+7];
+        solnOpts_.momAlgTauSymmetry_[j] = g_sum[13+j*13+8];
+        solnOpts_.momAlgTauWall_[j] = g_sum[13+j*13+9];
+        solnOpts_.momAlgTauOpen_[j] = g_sum[13+j*13+10];
+        solnOpts_.momAlgActSource_[j] = g_sum[13+j*13+11];
+        solnOpts_.momAlgTotMom_[j] = g_sum[13+j*13+12];                
     }
 
     provide_output();
@@ -357,7 +367,7 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
             keNm1 += 0.5*velNm1Scv[j]*velNm1Scv[j];
             keN += 0.5*velNScv[j]*velNScv[j];
             keNp1 += 0.5*velNp1Scv[j]*velNp1Scv[j];
-            mom_accumulation[j] += (gamma1*rhoNp1Scv*velNm1Scv[j] + gamma2*rhoNScv*velNm1Scv[j] + gamma3*rhoNm1Scv*velNm1Scv[j])/dt*ws_scv_volume[ip];
+            mom_accumulation[j] += (gamma1*rhoNp1Scv*velNp1Scv[j] + gamma2*rhoNScv*velNScv[j] + gamma3*rhoNm1Scv*velNm1Scv[j])/dt*ws_scv_volume[ip];
         }
 
         ke_accumulation +=  
@@ -366,6 +376,10 @@ ComputeMomKEFluxAlgorithmDriver::compute_accumulation(std::vector<double>& mom_a
       }
     }
   }
+
+
+  NaluEnv::self().naluOutput() << "  Processor mom accumulation:   " << std::setprecision (6) << mom_accumulation[0] << " " << mom_accumulation[1] << std::endl ;
+  NaluEnv::self().naluOutput() << "  Processor ke accumlation:   " << std::setprecision (6) << ke_accumulation << std::endl ;
 
 }
 
@@ -404,8 +418,8 @@ ComputeMomKEFluxAlgorithmDriver::compute_dissipation()
   std::vector<double> ws_scv_volume;
 
   // selector (everywhere density lives, locally owned and active) 
-  stk::mesh::Selector s_locally_owned = stk::mesh::selectField(*velocity)    
-    & !(realm_.get_inactive_selector());
+  stk::mesh::Selector s_locally_owned = metaData.locally_owned_part() & stk::mesh::selectField(*velocity)    
+    & !(realm_.get_inactive_selector() );
 
   stk::mesh::BucketVector const& elem_buckets =
     realm_.get_buckets( stk::topology::ELEMENT_RANK, s_locally_owned);
@@ -454,7 +468,7 @@ ComputeMomKEFluxAlgorithmDriver::compute_dissipation()
 
         // gather vectors
         const int niNdim = ni*nDim;
-        const int niNNdim = ni*nDim+nDim;
+        const int niNNdim = ni*nDim*nDim;
 
         const double * uNp1 = stk::mesh::field_data(velocityNp1, node);
         const double * dudxNp1 = stk::mesh::field_data(*dudx, node);
@@ -510,12 +524,12 @@ ComputeMomKEFluxAlgorithmDriver::compute_dissipation()
     }
   }
 
-  return ke_dissipation;
+  return -ke_dissipation;
 
 }
 
 //--------------------------------------------------------------------------
-//-------- compute_dissipation ---------------------------------------------
+//-------- compute_act_source_force_work------------------------------------
 //--------------------------------------------------------------------------
 void 
 ComputeMomKEFluxAlgorithmDriver::compute_act_source_force_work(std::vector<double> & act_source_force, double & act_source_work)
@@ -548,7 +562,7 @@ ComputeMomKEFluxAlgorithmDriver::compute_act_source_force_work(std::vector<doubl
   std::vector<double> ws_scv_volume;
 
   // selector (everywhere density lives, locally owned and active) 
-  stk::mesh::Selector s_locally_owned = stk::mesh::selectField(*velocity)    
+  stk::mesh::Selector s_locally_owned = metaData.locally_owned_part() & stk::mesh::selectField(*velocity)    
     & !(realm_.get_inactive_selector());
 
   stk::mesh::BucketVector const& elem_buckets =
@@ -598,7 +612,6 @@ ComputeMomKEFluxAlgorithmDriver::compute_act_source_force_work(std::vector<doubl
 
         // gather vectors
         const int niNdim = ni*nDim;
-        const int niNNdim = ni*nDim+nDim;
 
         const double * uNp1 = stk::mesh::field_data(velocityNp1, node);
         const double * actuatorSource= stk::mesh::field_data(*actuator_source, node);
@@ -637,9 +650,129 @@ ComputeMomKEFluxAlgorithmDriver::compute_act_source_force_work(std::vector<doubl
       }
     }
   }
-      
+
+  }
 
 
+
+}
+
+//--------------------------------------------------------------------------
+//-------- compute_tot_mom_ke-----------------------------------------------
+//--------------------------------------------------------------------------
+void 
+ComputeMomKEFluxAlgorithmDriver::compute_tot_mom_ke(std::vector<double> & tot_mom, double & tot_ke)
+{
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  const int nDim = metaData.spatial_dimension();
+
+  // initialize accumulation term to zero
+  tot_ke = 0.0;
+  for (int j=0; j<nDim; j++) tot_mom[j] = 0.0;
+  
+  // extract fields
+  ScalarFieldType *density = metaData.get_field<ScalarFieldType>(
+      stk::topology::NODE_RANK, "density");
+  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(
+      stk::topology::NODE_RANK, "velocity");
+  VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
+  VectorFieldType *coordinates = metaData.get_field<VectorFieldType>(
+    stk::topology::NODE_RANK, solnOpts_.get_coordinates_name());
+
+  //  required space
+  std::vector<double> ws_shape_function;
+  std::vector<double> ws_density;
+  std::vector<double> ws_velNp1;  
+  std::vector<double> ws_coordinates;
+  std::vector<double> ws_scv_volume;
+
+  // selector (everywhere density lives, locally owned and active) 
+  stk::mesh::Selector s_locally_owned = metaData.locally_owned_part() & stk::mesh::selectField(*velocity)    
+    & !(realm_.get_inactive_selector());
+
+  stk::mesh::BucketVector const& elem_buckets =
+    realm_.get_buckets( stk::topology::ELEMENT_RANK, s_locally_owned);
+  
+  for ( stk::mesh::BucketVector::const_iterator ib = elem_buckets.begin() ;
+        ib != elem_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+
+    // Extract master element
+    MasterElement *meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(b.topology());
+
+    // extract master element specifics
+    const int nodesPerElement = meSCV->nodesPerElement_;
+    const int numScvIp = meSCV->numIntPoints_;
+
+    // resize
+    ws_shape_function.resize(numScvIp*nodesPerElement);
+    ws_density.resize(nodesPerElement);
+    ws_velNp1.resize(nodesPerElement*nDim);
+    ws_coordinates.resize(nDim*nodesPerElement);
+    ws_scv_volume.resize(numScvIp);
+    
+    if ( lumpedMass_ )
+      meSCV->shifted_shape_fcn(&ws_shape_function[0]);
+    else
+      meSCV->shape_fcn(&ws_shape_function[0]);
+
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+
+      //===============================================
+      // gather nodal data; this is how we do it now..
+      //===============================================
+      stk::mesh::Entity const *  node_rels = b.begin_nodes(k);
+      int num_nodes = b.num_nodes(k);
+
+      // sanity check on num nodes
+      ThrowAssert( num_nodes == nodesPerElement );
+
+      for ( int ni = 0; ni < num_nodes; ++ni ) {
+        stk::mesh::Entity node = node_rels[ni];
+
+        // pointers to real data
+        const double * coords = stk::mesh::field_data(*coordinates, node );
+
+        // gather vectors
+        const int niNdim = ni*nDim;
+
+        const double * uNp1 = stk::mesh::field_data(velocityNp1, node);
+        ws_density[ni] = *stk::mesh::field_data(*density, node);
+        for ( int j=0; j < nDim; ++j ) {
+            ws_velNp1[niNdim+j]  = uNp1[j];
+            ws_coordinates[niNdim+j] = coords[j];
+        }
+      }
+
+      // compute geometry
+      double scv_error = 0.0;
+      meSCV->determinant(1, &ws_coordinates[0], &ws_scv_volume[0], &scv_error);
+
+      for ( int ip = 0; ip < numScvIp; ++ip ) {
+
+        // zero out;
+        std::vector<double> velNp1Scv(nDim,0.0);
+        double rhoScv = 0.0;
+        
+        const int offSet = ip*nodesPerElement;
+        for ( int ic = 0; ic < nodesPerElement; ++ic ) {
+          // save off shape function
+          const double r = ws_shape_function[offSet+ic];
+          rhoScv += r*ws_density[ic];
+          for ( int j=0; j < nDim; ++j ) {
+              velNp1Scv[j] += r*ws_velNp1[ic*nDim+j];
+          }
+        }
+
+        for ( int i = 0; i < nDim; ++i ) {
+            const int offSet = nDim*i;
+            tot_ke +=  0.5*rhoScv*velNp1Scv[i]*velNp1Scv[i]*ws_scv_volume[ip];
+            tot_mom[i] += rhoScv*velNp1Scv[i]*ws_scv_volume[ip];
+        }
+      }
+    }
   }
 
 
@@ -660,7 +793,7 @@ ComputeMomKEFluxAlgorithmDriver::provide_output()
     // output momentum closure
     std::vector<double> totalMomClosure(nDim,0.0);
     for(int j=0; j<nDim; j++) {
-        totalMomClosure[j] = solnOpts_.momAlgAccumulation_[j] + solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j] + solnOpts_.momAlgPressureInflow_[j] + solnOpts_.momAlgPressureSymmetry_[j] + solnOpts_.momAlgPressureWall_[j] + solnOpts_.momAlgPressureOpen_[j] + solnOpts_.momAlgTauInflow_[j] + solnOpts_.momAlgTauSymmetry_[j] + solnOpts_.momAlgTauWall_[j] + solnOpts_.momAlgTauOpen_[j] + solnOpts_.momAlgActSource_[j];
+        totalMomClosure[j] = solnOpts_.momAlgAccumulation_[j] - ( solnOpts_.momAlgInflow_[j] + solnOpts_.momAlgOpen_[j] ) + ( solnOpts_.momAlgPressureInflow_[j] + solnOpts_.momAlgPressureSymmetry_[j] + solnOpts_.momAlgPressureWall_[j] + solnOpts_.momAlgPressureOpen_[j] + solnOpts_.momAlgTauInflow_[j] + solnOpts_.momAlgTauSymmetry_[j] + solnOpts_.momAlgTauWall_[j] + solnOpts_.momAlgTauOpen_[j] + solnOpts_.momAlgActSource_[j] );
     }
     NaluEnv::self().naluOutputP0() << "Momentum Balance Review:  " << std::endl;
     NaluEnv::self().naluOutputP0() << "  Momentum accumulation: " ;
@@ -686,9 +819,13 @@ ComputeMomKEFluxAlgorithmDriver::provide_output()
     NaluEnv::self().naluOutputP0() << "  Total momentum closure:   " ;
     for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << totalMomClosure[j] << " " ;
     NaluEnv::self().naluOutputP0() << std::endl;
+
+    NaluEnv::self().naluOutputP0() << "  Total momentum in domain:   " ;
+    for(int j=0; j<nDim; j++) NaluEnv::self().naluOutputP0() << std::setprecision (6) << solnOpts_.momAlgTotMom_[j] << " " ;
+    NaluEnv::self().naluOutputP0() << std::endl;
     
     // output kinetic energy closure
-    const double totalKEClosure = solnOpts_.keAlgAccumulation_ + solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_+ solnOpts_.keAlgPressureInflow_ + solnOpts_.keAlgPressureSymmetry_ + solnOpts_.keAlgPressureOpen_ + solnOpts_.keAlgTauInflow_ + solnOpts_.keAlgTauSymmetry_ + solnOpts_.keAlgTauWall_ + solnOpts_.keAlgTauOpen_ + solnOpts_.keAlgDissipation_ + solnOpts_.keAlgActSourceWork_;
+    const double totalKEClosure = solnOpts_.keAlgAccumulation_ - ( solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_ ) + ( solnOpts_.keAlgPressureInflow_ + solnOpts_.keAlgPressureSymmetry_ + solnOpts_.keAlgPressureOpen_ + solnOpts_.keAlgTauInflow_ + solnOpts_.keAlgTauSymmetry_ + solnOpts_.keAlgTauWall_ + solnOpts_.keAlgTauOpen_ + solnOpts_.keAlgDissipation_ + solnOpts_.keAlgActSourceWork_ );
     NaluEnv::self().naluOutputP0() << "Kinetic Energy Balance Review:  " << std::endl;
     NaluEnv::self().naluOutputP0() << "  Energy accumulation: " << solnOpts_.keAlgAccumulation_ << std::endl;
     NaluEnv::self().naluOutputP0() << "  Total momentum flux:      " << std::setprecision (16) << solnOpts_.keAlgInflow_ + solnOpts_.keAlgOpen_<< std::endl;
@@ -697,6 +834,7 @@ ComputeMomKEFluxAlgorithmDriver::provide_output()
     NaluEnv::self().naluOutputP0() << "  Viscous/turbulent dissipation:   " << std::setprecision (6) << solnOpts_.keAlgDissipation_ << std::endl;
     NaluEnv::self().naluOutputP0() << "  Actuator Source work:   " << std::setprecision (6) << solnOpts_.keAlgActSourceWork_ << std::endl;
     NaluEnv::self().naluOutputP0() << "  Total kinetic energy closure:   " << std::setprecision (6) << totalKEClosure << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Total kinetic energy in domain:   " << std::setprecision (6) << solnOpts_.keAlgTotTKE_ << std::endl;    
     
 }
 

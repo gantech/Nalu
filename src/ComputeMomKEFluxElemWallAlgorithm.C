@@ -267,7 +267,7 @@ ComputeMomKEFluxElemWallAlgorithm::execute()
         }
 
         for(int j = 0; j < nDim; ++j) {
-            momFlux_PressureWall[j] += pressureBip  * areaVec[ip*nDim+j] ;
+            momFlux_PressureWall[j] -= pressureBip  * areaVec[ip*nDim+j] ;
         }
 
       //================================

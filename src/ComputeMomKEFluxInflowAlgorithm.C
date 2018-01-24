@@ -285,7 +285,7 @@ ComputeMomKEFluxInflowAlgorithm::execute()
 
         for(int j = 0; j < nDim; ++j) {
             momFluxInflow[j] += mdot * p_uBip[j] ;
-            momFlux_PressureInflow[j] += pressureBip  * areaVec[ip*nDim+j] ;
+            momFlux_PressureInflow[j] -= pressureBip  * areaVec[ip*nDim+j] ;
             
         }
         keFluxInflow += 0.5 * mdot * ke_Bip;

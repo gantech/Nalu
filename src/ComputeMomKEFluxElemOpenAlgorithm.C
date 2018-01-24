@@ -283,7 +283,7 @@ ComputeMomKEFluxElemOpenAlgorithm::execute()
         for(int j = 0; j < nDim; ++j) {
             ke_Bip += p_uBip[j] * p_uBip[j] ;
             momflux_open[j] += mdot[ip] * p_uBip[j] ;
-            momFlux_PressureOpen[j] += pressureBip  * areaVec[ip*nDim+j] ;
+            momFlux_PressureOpen[j] -= pressureBip  * areaVec[ip*nDim+j] ;
         }
         keflux_open += 0.5 * mdot[ip] * ke_Bip;
         keFlux_PressureOpen -= pressureBip * mdot[ip];
