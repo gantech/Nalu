@@ -382,7 +382,7 @@ AssembleContinuityElemOpenSolverAlgorithm::execute()
         }
         
         // final mdot
-        mdot += -projTimeScale*((pBip-pScs)*asq*inv_axdx*pstabFac + noc*includeNOC*pstabFac);
+        //        mdot += -projTimeScale*((pBip-pScs)*asq*inv_axdx*pstabFac + noc*includeNOC*pstabFac);
 
         // residual
         p_rhs[nearestNode] -= mdot/projTimeScale;

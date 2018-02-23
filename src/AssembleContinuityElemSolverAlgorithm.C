@@ -309,7 +309,7 @@ AssembleContinuityElemSolverAlgorithm::execute()
         double mdot = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
           mdot += (interpTogether*p_rho_uIp[j] + om_interpTogether*rhoIp*p_uIp[j] 
-                   - projTimeScale*(p_dpdxIp[j] - p_GpdxIp[j]))*p_scs_areav[ip*nDim+j];
+                   + projTimeScale*(p_GpdxIp[j]))*p_scs_areav[ip*nDim+j];
         }
 
         // residual; left and right

@@ -174,7 +174,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       const double rhoIp = 0.5*(densityR + densityL);
 
       //  mdot
-      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
+      double tmdot = 0.0; //-projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
       for ( int j = 0; j < nDim; ++j ) {
         const double axj = p_areaVec[j];
         const double dxj = coordR[j] - coordL[j];

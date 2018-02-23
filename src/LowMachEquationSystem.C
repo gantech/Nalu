@@ -14,6 +14,7 @@
 #include <AssembleContinuityElemSolverAlgorithm.h>
 #include <AssembleContinuityInflowSolverAlgorithm.h>
 #include <AssembleContinuityEdgeOpenSolverAlgorithm.h>
+#include <AssembleContinuityEdgeWallSolverAlgorithm.h>
 #include <AssembleContinuityElemOpenSolverAlgorithm.h>
 #include <AssembleContinuityNonConformalSolverAlgorithm.h>
 #include <AssembleMomentumEdgeSolverAlgorithm.h>
@@ -629,6 +630,13 @@ LowMachEquationSystem::solve_and_update()
     continuityEqSys_->timerMisc_ += (timeB-timeA);
     isInit_ = false;
   }
+
+  CopyFieldAlgorithm *pressureCopyAlg
+      = new CopyFieldAlgorithm(realm_, realm_.interiorPartVec_[0],
+                               continuityEqSys_->pTmp_,
+                               continuityEqSys_->pressure_,
+                               0, 1,
+                               stk::topology::NODE_RANK);
   
   // compute tvisc
   momentumEqSys_->tviscAlgDriver_->execute();
@@ -670,16 +678,23 @@ LowMachEquationSystem::solve_and_update()
     // continuity assemble, load_complete and solve
     continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
 
+    // // update pressure
+    // timeA = NaluEnv::self().nalu_time();
+    // field_axpby(
+    //     realm_.meta_data(),
+    //     realm_.bulk_data(),
+    //     1.0, *continuityEqSys_->pTmp_,
+    //     1.0, *continuityEqSys_->pressure_,
+    //     realm_.get_activate_aura());
+    // timeB = NaluEnv::self().nalu_time();
+    // continuityEqSys_->timerAssemble_ += (timeB-timeA);
+
     // update pressure
     timeA = NaluEnv::self().nalu_time();
-    field_axpby(
-      realm_.meta_data(),
-      realm_.bulk_data(),
-      1.0, *continuityEqSys_->pTmp_,
-      1.0, *continuityEqSys_->pressure_,
-      realm_.get_activate_aura());
+    pressureCopyAlg->execute();
     timeB = NaluEnv::self().nalu_time();
     continuityEqSys_->timerAssemble_ += (timeB-timeA);
+    
 
     // compute mdot
     timeA = NaluEnv::self().nalu_time();
@@ -695,6 +710,43 @@ LowMachEquationSystem::solve_and_update()
 
     // compute velocity relative to mesh with new velocity
     realm_.compute_vrtm();
+
+    // // Second pressure correction
+    // // continuity assemble, load_complete and solve
+    // continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
+
+    // // update pressure
+    // timeA = NaluEnv::self().nalu_time();
+    // field_axpby(
+    //     realm_.meta_data(),
+    //     realm_.bulk_data(),
+    //     1.0, *continuityEqSys_->pTmp_,
+    //     1.0, *continuityEqSys_->pressure_,
+    //     realm_.get_activate_aura());
+    // timeB = NaluEnv::self().nalu_time();
+    // continuityEqSys_->timerAssemble_ += (timeB-timeA);
+
+    // // // update pressure
+    // // timeA = NaluEnv::self().nalu_time();
+    // // pressureCopyAlg->execute();
+    // // timeB = NaluEnv::self().nalu_time();
+    // // continuityEqSys_->timerAssemble_ += (timeB-timeA);
+    
+    // // compute mdot
+    // timeA = NaluEnv::self().nalu_time();
+    // continuityEqSys_->computeMdotAlgDriver_->execute();
+    // timeB = NaluEnv::self().nalu_time();
+    // continuityEqSys_->timerMisc_ += (timeB-timeA);
+
+    // // project nodal velocity
+    // timeA = NaluEnv::self().nalu_time();
+    // project_nodal_velocity();
+    // timeB = NaluEnv::self().nalu_time();
+    // timerMisc_ += (timeB-timeA);
+
+    // // compute velocity relative to mesh with new velocity
+    // realm_.compute_vrtm();
+    
 
     // velocity gradients based on current values;
     // note timing of this algorithm relative to initial_work
@@ -1711,17 +1763,17 @@ MomentumEquationSystem::register_wall_bc(
   }
   
   // copy velocity_bc to velocity np1
-  CopyFieldAlgorithm *theCopyAlg
-    = new CopyFieldAlgorithm(realm_, part,
-			     theBcField, &velocityNp1,
-			     0, nDim,
-			     stk::topology::NODE_RANK);
+  // CopyFieldAlgorithm *theCopyAlg
+  //   = new CopyFieldAlgorithm(realm_, part,
+  //       		     theBcField, &velocityNp1,
+  //       		     0, nDim,
+  //       		     stk::topology::NODE_RANK);
 
   // wall function activity will only set dof velocity np1 wall value as an IC
-  if ( anyWallFunctionActivated )
-    realm_.initCondAlg_.push_back(theCopyAlg);
-  else
-    bcDataMapAlg_.push_back(theCopyAlg);
+  // if ( anyWallFunctionActivated )
+  //   realm_.initCondAlg_.push_back(theCopyAlg);
+  // else
+  //   bcDataMapAlg_.push_back(theCopyAlg);
     
   // non-solver; contribution to Gjui; allow for element-based shifted
   if ( !managePNG_ ) {
@@ -1729,7 +1781,7 @@ MomentumEquationSystem::register_wall_bc(
       = assembleNodalGradAlgDriver_->algMap_.find(algType);
     if ( it == assembleNodalGradAlgDriver_->algMap_.end() ) {
       Algorithm *theAlg
-        = new AssembleNodalGradUBoundaryAlgorithm(realm_, part, theBcField, &dudxNone, edgeNodalGradient_);
+        = new AssembleNodalGradUBoundaryAlgorithm(realm_, part, &velocityNp1, &dudxNone, edgeNodalGradient_);
       assembleNodalGradAlgDriver_->algMap_[algType] = theAlg;
     }
     else {
@@ -2653,21 +2705,21 @@ ContinuityEquationSystem::register_open_bc(
   // register boundary data
   stk::mesh::MetaData &meta_data = realm_.meta_data();
   ScalarFieldType *pressureBC = NULL;
-  if ( !realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
-    pressureBC = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure_bc"));
-    stk::mesh::put_field(*pressureBC, *part );
-  }
+  // if ( !realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
+  //   pressureBC = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure_bc"));
+  //   stk::mesh::put_field(*pressureBC, *part );
+  // }
 
   VectorFieldType &dpdxNone = dpdx_->field_of_state(stk::mesh::StateNone);
-
+  ScalarFieldType &pressureNone = pressure_->field_of_state(stk::mesh::StateNone);
+  
   // non-solver; contribution to Gjp; allow for element-based shifted
   if ( !managePNG_ ) {
     std::map<AlgorithmType, Algorithm *>::iterator it
       = assembleNodalGradAlgDriver_->algMap_.find(algType);
     if ( it == assembleNodalGradAlgDriver_->algMap_.end() ) {
       Algorithm *theAlg 
-        = new AssembleNodalGradBoundaryAlgorithm(realm_, part, pressureBC == NULL ? pressure_ : pressureBC, 
-                                                 &dpdxNone, edgeNodalGradient_);
+         = new AssembleNodalGradBoundaryAlgorithm(realm_, part, &pressureNone, &dpdxNone, edgeNodalGradient_);
       assembleNodalGradAlgDriver_->algMap_[algType] = theAlg;
     }
     else {
@@ -2758,6 +2810,22 @@ ContinuityEquationSystem::register_wall_bc(
       it->second->partVec_.push_back(part);
     }
   }
+
+  // lhs
+  if ( !elementContinuityEqs_ ) {
+      // solver; lhs
+      std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi =
+          solverAlgDriver_->solverAlgMap_.find(algType);
+      if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
+          AssembleContinuityEdgeWallSolverAlgorithm *theAlg
+              = new AssembleContinuityEdgeWallSolverAlgorithm(realm_, part, this);
+          solverAlgDriver_->solverAlgMap_[algType] = theAlg;
+      }
+      else {
+          itsi->second->partVec_.push_back(part);
+      }
+  }
+  
 }
 
 //--------------------------------------------------------------------------
