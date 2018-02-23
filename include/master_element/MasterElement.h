@@ -23,12 +23,6 @@
 #include <string>
 #include <array>
 
-#ifdef __INTEL_COMPILER
-#define POINTER_RESTRICT restrict
-#else
-#define POINTER_RESTRICT __restrict__
-#endif
-
 namespace stk {
   struct topology;
 }
@@ -357,101 +351,6 @@ private:
   ) const;
 };
 
-// 3D Quad 27 subcontrol volume
-class Quad92DSCV : public QuadrilateralP2Element
-{
-public:
-  Quad92DSCV();
-  virtual ~Quad92DSCV() {}
-
-  const int * ipNodeMap(int ordinal = 0);
-
-  void determinant(
-    const int nelem,
-    const double *coords,
-    double *areav,
-    double * error );
-
-private:
-  void set_interior_info();
-
-  double jacobian_determinant(
-    const double *POINTER_RESTRICT elemNodalCoords,
-    const double *POINTER_RESTRICT shapeDerivs ) const;
-
-  std::vector<double> ipWeight_;
-};
-
-// 3D Hex 27 subcontrol surface
-class Quad92DSCS : public QuadrilateralP2Element
-{
-public:
-  Quad92DSCS();
-  virtual ~Quad92DSCS() {}
-
-  void determinant(
-    const int nelem,
-    const double *coords,
-    double *areav,
-    double * error );
-
-  void grad_op(
-    const int nelem,
-    const double *coords,
-    double *gradop,
-    double *deriv,
-    double *det_j,
-    double * error );
-
-  void shifted_grad_op(
-    const int nelem,
-    const double *coords,
-    double *gradop,
-    double *deriv,
-    double *det_j,
-    double * error );
-
-  void face_grad_op(
-    const int nelem,
-    const int face_ordinal,
-    const double *coords,
-    double *gradop,
-    double *det_j,
-    double * error );
-
-  void gij(
-    const double *coords,
-    double *gupperij,
-    double *glowerij,
-    double *deriv);
-
-  const int * adjacentNodes();
-
-  const int * ipNodeMap(int ordinal = 0);
-
-  int opposingNodes(
-    const int ordinal, const int node);
-
-  int opposingFace(
-    const int ordinal, const int node);
-
-  const int* side_node_ordinals(int sideOrdinal) final;
-
-
-private:
-  void set_interior_info();
-  void set_boundary_info();
-
-  template <Jacobian::Direction direction> void
-  area_vector(
-    const double *POINTER_RESTRICT elemNodalCoords,
-    double *POINTER_RESTRICT shapeDeriv,
-    double *POINTER_RESTRICT areaVector ) const;
-
-  std::vector<ContourData> ipInfo_;
-  int ipsPerFace_;
-};
-
 // 2D Tri 3 subcontrol volume
 class Tri2DSCV : public MasterElement
 {
@@ -477,60 +376,6 @@ public:
     const int &npts,
     const double *par_coord,
     double* shape_fcn);
-
-};
-
-// 3D Quad 4
-class Quad3DSCS : public MasterElement
-{
-public:
-
-  Quad3DSCS();
-  virtual ~Quad3DSCS();
-
-  const int * ipNodeMap(int ordinal = 0);
-
-  void determinant(
-    const int nelem,
-    const double *coords,
-    double *areav,
-    double * error );
-
-  void shape_fcn(
-    double *shpfc);
-
-  void shifted_shape_fcn(
-    double *shpfc);
-
-  double isInElement(
-    const double *elemNodalCoord,
-    const double *pointCoord,
-    double *isoParCoord);
-  
-  void interpolatePoint(
-    const int &nComp,
-    const double *isoParCoord,
-    const double *field,
-    double *result);
-
-  void general_shape_fcn(
-    const int numIp,
-    const double *isoParCoord,
-    double *shpfc);
-
-  void general_normal(
-    const double *isoParCoord,
-    const double *coords,
-    double *normal);
-
-  void non_unit_face_normal(
-    const double * par_coord,
-    const double * elem_nodal_coor,
-    double * normal_vector );
-  
-  double parametric_distance(const std::vector<double> &x);
-
-  const double elemThickness_;
 };
 
 // 3D Tri 3

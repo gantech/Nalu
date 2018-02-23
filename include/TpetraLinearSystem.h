@@ -42,6 +42,17 @@ typedef std::pair<stk::mesh::Entity, stk::mesh::Entity> Connection;
 typedef Kokkos::UnorderedMap<Connection,void> ConnectionSetKK;
 typedef std::vector< Connection > ConnectionVec;
 
+typedef typename LinSys::Vector::dual_view_type dual_view_type;
+typedef typename dual_view_type::t_host host_view_type;
+
+  enum DOFStatus {
+    DS_NotSet           = 0,
+    DS_SkippedDOF       = 1 << 1,
+    DS_OwnedDOF         = 1 << 2,
+    DS_GloballyOwnedDOF = 1 << 3,
+    DS_GhostedDOF       = 1 << 4
+  };
+
 class TpetraLinearSystem : public LinearSystem
 {
 public:
@@ -121,14 +132,6 @@ public:
   }
 
 
-  enum DOFStatus {
-    DS_NotSet           = 0,
-    DS_SkippedDOF       = 1 << 1,
-    DS_OwnedDOF         = 1 << 2,
-    DS_GloballyOwnedDOF = 1 << 3,
-    DS_GhostedDOF       = 1 << 4
-  };
-
   int getDofStatus(stk::mesh::Entity node);
 
 private:
@@ -187,6 +190,10 @@ private:
 
   Teuchos::RCP<LinSys::Matrix> ownedMatrix_;
   Teuchos::RCP<LinSys::Vector> ownedRhs_;
+  LinSys::Matrix::local_matrix_type ownedLocalMatrix_;
+  LinSys::Matrix::local_matrix_type globallyOwnedLocalMatrix_;
+  host_view_type ownedLocalRhs_;
+  host_view_type globallyOwnedLocalRhs_;
 
   Teuchos::RCP<LinSys::Matrix> globallyOwnedMatrix_;
   Teuchos::RCP<LinSys::Vector> globallyOwnedRhs_;
@@ -222,6 +229,8 @@ void copy_kokkos_unordered_map(const Kokkos::UnorderedMap<T1,T2>& src,
   }
   ThrowRequire(fail_count == 0);
 }
+
+int getDofStatus_impl(stk::mesh::Entity node, const Realm& realm);
 
 } // namespace nalu
 } // namespace Sierra

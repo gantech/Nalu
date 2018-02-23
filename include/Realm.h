@@ -20,6 +20,7 @@
 #include <MaterialPropertys.h>
 #include <EquationSystems.h>
 #include <Teuchos_RCP.hpp>
+#include <overset/OversetManager.h>
 
 #include <stk_util/util/ParameterList.hpp>
 
@@ -49,7 +50,7 @@ class Algorithm;
 class AlgorithmDriver;
 class AuxFunctionAlgorithm;
 class ComputeGeometryAlgorithmDriver;
-class OversetManager;
+// class OversetManager;
 class NonConformalManager;
 class ErrorIndicatorAlgorithmDriver;
 #if defined (NALU_USES_PERCEPT)
@@ -157,10 +158,10 @@ class Realm {
   void init_current_coordinates();
 
   std::string get_coordinates_name();
-  bool has_mesh_motion();
-  bool has_mesh_deformation();
-  bool does_mesh_move();
-  bool has_non_matching_boundary_face_alg();
+  bool has_mesh_motion() const;
+  bool has_mesh_deformation() const;
+  bool does_mesh_move() const;
+  bool has_non_matching_boundary_face_alg() const;
 
   // overset boundary condition requires elemental field registration
   bool query_for_overset();
@@ -270,6 +271,12 @@ class Realm {
   virtual void initial_work();
   
   void set_global_id();
+
+  /** Initialize the HYPRE global row IDs
+   *
+   *  \sa Realm::hypreGlobalId_
+   */
+  void set_hypre_global_id();
  
   /// check job for fitting in memory
   void check_job(bool get_node_count);
@@ -348,7 +355,9 @@ class Realm {
   // get aura, bulk and meta data
   bool get_activate_aura();
   stk::mesh::BulkData & bulk_data();
+  const stk::mesh::BulkData & bulk_data() const;
   stk::mesh::MetaData & meta_data();
+  const stk::mesh::MetaData & meta_data() const;
 
   // inactive part
   stk::mesh::Selector get_inactive_selector();
@@ -505,6 +514,9 @@ class Realm {
   // beginning wall time
   double wallTimeStart_;
 
+  // mesh parts for all interior domains
+  stk::mesh::PartVector interiorPartVec_;
+
   // mesh parts for all boundary conditions
   stk::mesh::PartVector bcPartVec_;
 
@@ -583,6 +595,45 @@ class Realm {
 
   stk::mesh::PartVector allPeriodicInteractingParts_;
   stk::mesh::PartVector allNonConformalInteractingParts_;
+
+  bool isFinalOuterIter_{false};
+
+  /** The starting index (global) of the HYPRE linear system in this MPI rank
+   *
+   *  Note that this is actually the offset into the linear system. This index
+   *  must be adjusted accordingly to account for multiple degrees of freedom on
+   *  a particular node. This is performed in sierra::nalu::HypreLinearSystem.
+   */
+  stk::mesh::EntityId hypreILower_;
+
+  /** The ending index (global) of the HYPRE linear system in this MPI rank
+   *
+   *  Note that this is actually the offset into the linear system. This index
+   *  must be adjusted accordingly to account for multiple degrees of freedom on
+   *  a particular node. This is performed in sierra::nalu::HypreLinearSystem.
+   */
+  stk::mesh::EntityId hypreIUpper_;
+
+  /** The total number of HYPRE nodes in the linear system
+   *
+   *  Note that this is not an MPI rank local quantity
+   */
+  stk::mesh::EntityId hypreNumNodes_;
+
+  /** Global Row IDs for the HYPRE linear system
+   *
+   *  The HYPRE IDs are different from STK IDs and Realm::naluGlobalId_ because
+   *  HYPRE expects contiguous IDs for matrix rows and further requires that the
+   *  IDs be ordered across MPI ranks; i.e., startIdx (MPI_rank + 1) =
+   *  endIdx(MPI_rank) + 1.
+   */
+  HypreIDFieldType* hypreGlobalId_{nullptr};
+
+  /** Flag indicating whether Hypre solver is being used for any of the equation
+   * systems.
+   */
+  bool hypreIsActive_{false};
+
 };
 
 } // namespace nalu

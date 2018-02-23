@@ -14,14 +14,13 @@
 #include <SimdInterface.h>
 #include <KokkosInterface.h>
 
-#ifdef __INTEL_COMPILER
-#define POINTER_RESTRICT restrict
-#else
-#define POINTER_RESTRICT __restrict__
-#endif
-
 namespace sierra{
 namespace nalu{
+
+namespace MEconstants {
+  static const double realmin = std::numeric_limits<double>::min();
+}
+
   class LagrangeBasis;
 
   bool isoparameteric_coordinates_for_point_2d(

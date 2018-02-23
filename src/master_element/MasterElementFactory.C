@@ -5,20 +5,22 @@
 /*  directory structure                                                   */
 /*------------------------------------------------------------------------*/
 
-#include <master_element/MasterElementFactory.h>
-#include <master_element/MasterElement.h>
+#include "master_element/MasterElementFactory.h"
+#include "master_element/MasterElement.h"
 
-#include <master_element/Hex8CVFEM.h>
-#include <master_element/Hex27CVFEM.h>
-#include <master_element/Tet4CVFEM.h>
-#include <master_element/Tri32DCVFEM.h>
-#include <master_element/Quad42DCVFEM.h>
-#include <master_element/Wed6CVFEM.h>
-#include <master_element/Pyr5CVFEM.h>
-#include <master_element/MasterElementHO.h>
+#include "master_element/Hex8CVFEM.h"
+#include "master_element/Hex27CVFEM.h"
+#include "master_element/Tet4CVFEM.h"
+#include "master_element/Pyr5CVFEM.h"
+#include "master_element/Wed6CVFEM.h"
+#include "master_element/Quad43DCVFEM.h"
+#include "master_element/Quad42DCVFEM.h"
+#include "master_element/Quad92DCVFEM.h"
+#include "master_element/Tri32DCVFEM.h"
+#include "master_element/MasterElementHO.h"
 
-#include <NaluEnv.h>
-#include <nalu_make_unique.h>
+#include "NaluEnv.h"
+#include "nalu_make_unique.h"
 
 #include <stk_util/environment/ReportHandler.hpp>
 #include <stk_topology/topology.hpp>
@@ -86,6 +88,10 @@ namespace nalu{
       case stk::topology::SHELL_TRI_3:
         NaluEnv::self().naluOutputP0() << "SHELL_TRI_3 only supported for io surface transfer applications" << std::endl;
         return make_unique<Tri3DSCS>();
+        
+      case stk::topology::BEAM_2:
+        NaluEnv::self().naluOutputP0() << "BEAM_2 is only supported for io surface transfer applications" << std::endl;
+        return make_unique<Edge2DSCS>();
 
       default:
         NaluEnv::self().naluOutputP0() << "sorry, we only support hex8, tet4, pyr5, wed6,"

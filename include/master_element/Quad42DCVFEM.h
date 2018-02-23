@@ -23,12 +23,6 @@
 #include <string>
 #include <array>
 
-#ifdef __INTEL_COMPILER
-#define POINTER_RESTRICT restrict
-#else
-#define POINTER_RESTRICT __restrict__
-#endif
-
 namespace sierra{
 namespace nalu{
 
@@ -36,6 +30,7 @@ namespace nalu{
 class Quad42DSCV : public MasterElement
 {
 public:
+  using Traits = AlgTraitsQuad4_2D;
   Quad42DSCV();
   virtual ~Quad42DSCV();
 
@@ -44,6 +39,11 @@ public:
   void determinant(
     SharedMemView<DoubleType**> &coords,
     SharedMemView<DoubleType*> &vol) override ;
+
+  void grad_op(
+    SharedMemView<DoubleType** >& coords,
+    SharedMemView<DoubleType***>& gradop,
+    SharedMemView<DoubleType***>& deriv) override ;
 
   void determinant(
     const int nelem,
@@ -67,6 +67,7 @@ public:
 class Quad42DSCS : public MasterElement
 {
 public:
+  using Traits = AlgTraitsQuad4_2D;
   Quad42DSCS();
   virtual ~Quad42DSCS();
 
@@ -83,7 +84,7 @@ public:
     double * error ) override ;
 
   void grad_op(
-    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType** >& coords,
     SharedMemView<DoubleType***>& gradop,
     SharedMemView<DoubleType***>& deriv) override ;
 
@@ -96,7 +97,7 @@ public:
     double * error ) override ;
 
   void shifted_grad_op(
-    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType** >& coords,
     SharedMemView<DoubleType***>& gradop,
     SharedMemView<DoubleType***>& deriv) override ;
 
@@ -125,7 +126,7 @@ public:
     double * error ) override ;
 
   void gij( 
-    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType** >& coords,
     SharedMemView<DoubleType***>& gupper,
     SharedMemView<DoubleType***>& glower,
     SharedMemView<DoubleType***>& deriv) override ;

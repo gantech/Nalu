@@ -23,12 +23,6 @@
 #include <string>
 #include <array>
 
-#ifdef __INTEL_COMPILER
-#define POINTER_RESTRICT restrict
-#else
-#define POINTER_RESTRICT __restrict__
-#endif
-
 namespace stk {
   struct topology;
 }
@@ -53,6 +47,11 @@ public:
   void determinant(
     SharedMemView<DoubleType**>& coords,
     SharedMemView<DoubleType*>& vol);
+
+  void grad_op(
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop,
+    SharedMemView<DoubleType***>& deriv);
 
   void determinant(
     const int nelem,

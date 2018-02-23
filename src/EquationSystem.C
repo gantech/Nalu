@@ -20,7 +20,7 @@
 #include <LinearSystem.h>
 #include <ConstantAuxFunction.h>
 #include <Enums.h>
-#include <KernelBuilderLog.h>
+#include <kernel/KernelBuilderLog.h>
 
 // overset
 #include <overset/AssembleOversetSolverConstraintAlgorithm.h>
@@ -178,12 +178,8 @@ EquationSystem::provide_norm_increment()
 void
 EquationSystem::dump_eq_time()
 {
-  // extract preconditioning time which lives on the linear solver
-  if ( NULL != linsys_ ) {
-    timerPrecond_ = linsys_->get_timer_precond();
-    // subtract out preconditioning time from solve time
-    timerSolve_ -= timerPrecond_;
-  }
+  // subtract out preconditioning time from solve time
+  timerSolve_ -= timerPrecond_;
 
   double l_timer[6] = {timerAssemble_, timerLoadComplete_, timerSolve_, timerMisc_, timerInit_, timerPrecond_};
   double g_min[6] = {};
@@ -293,6 +289,7 @@ EquationSystem::assemble_and_solve(
   error = linsys_->solve(deltaSolution);
   timeB = NaluEnv::self().nalu_time();
   timerSolve_ += (timeB-timeA);
+  timerPrecond_ += linsys_->get_timer_precond();
 
   if ( realm_.hasPeriodic_) {
     timeA = NaluEnv::self().nalu_time();
@@ -429,27 +426,6 @@ EquationSystem::evaluate_properties()
   for ( size_t k = 0; k < propertyAlg_.size(); ++k ) {
     propertyAlg_[k]->execute();
   }
-}
-
-//--------------------------------------------------------------------------
-//-------- create_peclet_function ------------------------------------------
-//--------------------------------------------------------------------------
-PecletFunction *
-EquationSystem::create_peclet_function(
-  const std::string dofName)
-{
-  PecletFunction *pecletFunction = NULL;
-  if ( "classic" == realm_.get_tanh_functional_form(dofName) ) { 
-    const double hybridFactor = realm_.get_hybrid_factor(dofName);
-    const double A = 5.0;
-    pecletFunction = new ClassicPecletFunction(A, hybridFactor);
-  }
-  else {
-    const double c1 = realm_.get_tanh_trans(dofName);
-    const double c2 = realm_.get_tanh_width(dofName);
-    pecletFunction = new TanhFunction(c1, c2);
-  }
-  return pecletFunction;
 }
 
 //--------------------------------------------------------------------------

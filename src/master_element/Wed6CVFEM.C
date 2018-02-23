@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------*/
-/*  Copyright 2014 National Renewable Energy Laboratory.                  */
+/*  Copyright 2014 Sandia Corporation.                                    */
 /*  This software is released under the license detailed                  */
 /*  in the file, LICENSE, which is located in the top-level Nalu          */
 /*  directory structure                                                   */
@@ -12,6 +12,46 @@
 
 namespace sierra {
 namespace nalu {
+
+//-------- wed_deriv -------------------------------------------------------
+void wed_deriv(
+  const int npts,
+  const double* intgLoc,
+  SharedMemView<DoubleType***>& deriv)
+{
+  for (int  j = 0; j < npts; ++j) {
+    int k  = j*3;
+
+    const DoubleType r  = intgLoc[k];
+    const DoubleType s  = intgLoc[k+1];
+    const DoubleType t  = 1.0 - r - s;
+    const DoubleType xi = intgLoc[k + 2];
+
+    deriv(j,0,0) = -0.5 * (1.0 - xi);  // d(N_1)/ d(r)  = deriv[0]
+    deriv(j,0,1) = -0.5 * (1.0 - xi);  // d(N_1)/ d(s)  = deriv[1]
+    deriv(j,0,2) = -0.5 * t;           // d(N_1)/ d(xi) = deriv[2]
+
+    deriv(j,1,0) =  0.5 * (1.0 - xi);  // d(N_2)/ d(r)  = deriv[0 + 3]
+    deriv(j,1,1) =  0.0;               // d(N_2)/ d(s)  = deriv[1 + 3]
+    deriv(j,1,2) = -0.5 * r;           // d(N_2)/ d(xi) = deriv[2 + 3]
+
+    deriv(j,2,0) =  0.0;               // d(N_3)/ d(r)  = deriv[0 + 6]
+    deriv(j,2,1) =  0.5 * (1.0 - xi);  // d(N_3)/ d(s)  = deriv[1 + 6]
+    deriv(j,2,2) = -0.5 * s;           // d(N_3)/ d(xi) = deriv[2 + 6]
+
+    deriv(j,3,0) = -0.5 * (1.0 + xi);  // d(N_4)/ d(r)  = deriv[0 + 9]
+    deriv(j,3,1) = -0.5 * (1.0 + xi);  // d(N_4)/ d(s)  = deriv[1 + 9]
+    deriv(j,3,2) =  0.5 * t;           // d(N_4)/ d(xi) = deriv[2 + 9]
+
+    deriv(j,4,0) =  0.5 * (1.0 + xi);  // d(N_5)/ d(r)  = deriv[0 + 12]
+    deriv(j,4,1) =  0.0;               // d(N_5)/ d(s)  = deriv[1 + 12]
+    deriv(j,4,2) =  0.5 * r;           // d(N_5)/ d(xi) = deriv[2 + 12]
+
+    deriv(j,5,0) =  0.0;               // d(N_6)/ d(r)  = deriv[0 + 15]
+    deriv(j,5,1) =  0.5 * (1.0 + xi);  // d(N_6)/ d(s)  = deriv[1 + 15]
+    deriv(j,5,2) =  0.5 * s;           // d(N_6)/ d(xi) = deriv[2 + 15]
+  }
+}
 
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
@@ -30,14 +70,15 @@ WedSCV::WedSCV()
 
   // standard integration location
   intgLoc_.resize(18);
-  const double seven12th = 7.0/12.0;
-  const double five24th = 5.0/24.0;
-  intgLoc_[0]  = five24th;  intgLoc_[1]  = five24th;  intgLoc_[2]  = -0.5; // vol 0
-  intgLoc_[3]  = seven12th; intgLoc_[4]  = five24th;  intgLoc_[5]  = -0.5; // vol 1
-  intgLoc_[6]  = five24th;  intgLoc_[7]  = seven12th; intgLoc_[8]  = -0.5; // vol 2
-  intgLoc_[9]  = five24th;  intgLoc_[10] = five24th;  intgLoc_[11] = 0.5;  // vol 3
-  intgLoc_[12] = seven12th; intgLoc_[13] = five24th;  intgLoc_[14] = 0.5;  // vol 4
-  intgLoc_[15] = five24th;  intgLoc_[16] = seven12th; intgLoc_[17] = 0.5;  // vol 5
+
+  const double eleven18ths = 11.0/18.0;
+  const double seven36ths = 7.0/36.0;
+  intgLoc_[0]  = seven36ths;  intgLoc_[1]  = seven36ths;  intgLoc_[2]  = -0.5; // vol 0
+  intgLoc_[3]  = eleven18ths; intgLoc_[4]  = seven36ths;  intgLoc_[5]  = -0.5; // vol 1
+  intgLoc_[6]  = seven36ths;  intgLoc_[7]  = eleven18ths; intgLoc_[8]  = -0.5; // vol 2
+  intgLoc_[9]  = seven36ths;  intgLoc_[10] = seven36ths;  intgLoc_[11] = 0.5;  // vol 3
+  intgLoc_[12] = eleven18ths; intgLoc_[13] = seven36ths;  intgLoc_[14] = 0.5;  // vol 4
+  intgLoc_[15] = seven36ths;  intgLoc_[16] = eleven18ths; intgLoc_[17] = 0.5;  // vol 5
 
   // shifted
   intgLocShift_.resize(18);
@@ -176,6 +217,18 @@ void WedSCV::determinant(
 }
 
 //--------------------------------------------------------------------------
+//-------- grad_op ---------------------------------------------------------
+//--------------------------------------------------------------------------
+void WedSCV::grad_op(
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop,
+  SharedMemView<DoubleType***>& deriv)
+{
+  wed_deriv(numIntPoints_, &intgLoc_[0], deriv);
+  generic_grad_op_3d<AlgTraitsWed6>(deriv, coords, gradop);
+}
+
+//--------------------------------------------------------------------------
 //-------- determinant -----------------------------------------------------
 //--------------------------------------------------------------------------
 void WedSCV::determinant(
@@ -286,8 +339,9 @@ WedSCS::WedSCS()
   // standard integration location
   const double oneSixth = 1.0/6.0;
   const double five12th = 5.0/12.0;
-  const double seven12th = 7.0/12.0;
-  const double five24th = 5.0/24.0;
+  const double eleven18th = 11.0/18.0;
+  const double seven36th = 7.0/36.0;
+
   intgLoc_.resize(27);
   intgLoc_[0]  =  five12th;  intgLoc_[1]  = oneSixth;  intgLoc_[2]  = -0.50; // surf 1    1->2
   intgLoc_[3]  =  five12th;  intgLoc_[4]  = five12th;  intgLoc_[5]  = -0.50; // surf 2    2->3
@@ -295,9 +349,9 @@ WedSCS::WedSCS()
   intgLoc_[9]  =  five12th;  intgLoc_[10] = oneSixth;  intgLoc_[11] =  0.50; // surf 4    4->5
   intgLoc_[12] =  five12th;  intgLoc_[13] = five12th;  intgLoc_[14] =  0.50; // surf 5    5->6
   intgLoc_[15] =  oneSixth;  intgLoc_[16] = five12th;  intgLoc_[17] =  0.50; // surf 6    4->6
-  intgLoc_[18] =  five24th;  intgLoc_[19] = five24th;  intgLoc_[20] =  0.00; // surf 7    1->4
-  intgLoc_[21] =  seven12th; intgLoc_[22] = five24th;  intgLoc_[23] =  0.00; // surf 8    2->5
-  intgLoc_[24] =  five24th;  intgLoc_[25] = seven12th; intgLoc_[26] =  0.00; // surf 9    3->6
+  intgLoc_[18] =  seven36th;  intgLoc_[19] = seven36th;  intgLoc_[20] =  0.00; // surf 7    1->4
+  intgLoc_[21] =  eleven18th; intgLoc_[22] = seven36th;  intgLoc_[23] =  0.00; // surf 8    2->5
+  intgLoc_[24] =  seven36th;  intgLoc_[25] = eleven18th; intgLoc_[26] =  0.00; // surf 9    3->6
 
   // shifted
   intgLocShift_.resize(27);
@@ -325,13 +379,13 @@ WedSCS::WedSCS()
   intgExpFace_[27] = 0.0;       intgExpFace_[28] = 0.25;      intgExpFace_[29] =  0.5; // face 2, surf 1
   intgExpFace_[30] = 0.0;       intgExpFace_[31] = 0.75;      intgExpFace_[32] =  0.5; // face 2, surf 2
   intgExpFace_[33] = 0.0;       intgExpFace_[34] = 0.75;      intgExpFace_[35] = -0.5; // face 2, surf 3
-  intgExpFace_[36] = five24th;  intgExpFace_[37] = five24th;  intgExpFace_[38] = -1.0; // surf 3; nodes 0,2,1
-  intgExpFace_[39] = five24th;  intgExpFace_[40] = seven12th; intgExpFace_[41] = -1.0; // face 3, surf 1
-  intgExpFace_[42] = seven12th; intgExpFace_[43] = five24th;  intgExpFace_[44] = -1.0; // face 3, surf 2
+  intgExpFace_[36] = seven36th;  intgExpFace_[37] = seven36th;  intgExpFace_[38] = -1.0; // surf 3; nodes 0,2,1
+  intgExpFace_[39] = seven36th;  intgExpFace_[40] = eleven18th; intgExpFace_[41] = -1.0; // face 3, surf 1
+  intgExpFace_[42] = eleven18th; intgExpFace_[43] = seven36th;  intgExpFace_[44] = -1.0; // face 3, surf 2
   intgExpFace_[45] = 0.0;       intgExpFace_[46] = 0.0;       intgExpFace_[47] =  0.0; // (blank)
-  intgExpFace_[48] = five24th;  intgExpFace_[49] = five24th;  intgExpFace_[50] = 1.0;  // surf 4; nodes 3,4,5
-  intgExpFace_[51] = seven12th; intgExpFace_[52] = five24th;  intgExpFace_[53] = 1.0;  // face 4, surf 1
-  intgExpFace_[54] = five24th;  intgExpFace_[55] = seven12th; intgExpFace_[56] = 1.0;  // face 4, surf 2
+  intgExpFace_[48] = seven36th;  intgExpFace_[49] = seven36th;  intgExpFace_[50] = 1.0;  // surf 4; nodes 3,4,5
+  intgExpFace_[51] = eleven18th; intgExpFace_[52] = seven36th;  intgExpFace_[53] = 1.0;  // face 4, surf 1
+  intgExpFace_[54] = seven36th;  intgExpFace_[55] = eleven18th; intgExpFace_[56] = 1.0;  // face 4, surf 2
   intgExpFace_[57] = 0.0;       intgExpFace_[58] = 0.0;       intgExpFace_[59] = 0.0;  // (blank)
 
   // boundary integration point ip node mapping (ip on an ordinal to local node number)
@@ -343,10 +397,9 @@ WedSCS::WedSCS()
   // face 2;
   ipNodeMap_[8] = 0;  ipNodeMap_[9] = 3;  ipNodeMap_[10] = 5; ipNodeMap_[11] = 2;
   // face 3;
-  ipNodeMap_[12] = 0; ipNodeMap_[13] = 1; ipNodeMap_[14] = 1; ipNodeMap_[15] = 0; //empty
+  ipNodeMap_[12] = 0; ipNodeMap_[13] = 2; ipNodeMap_[14] = 1; ipNodeMap_[15] = 0; //empty
   // face 4;
   ipNodeMap_[16] = 3; ipNodeMap_[17] = 4; ipNodeMap_[18] = 5; ipNodeMap_[19] = 0; // empty
-
 
   sideNodeOrdinals_ = {
       0, 1, 4, 3, // ordinal 0
@@ -533,46 +586,6 @@ void WedSCS::determinant(
   // all is always well; no error checking
   *error = 0;
 }
-
-void wed_deriv(
-  const int npts,
-  const double* intgLoc,
-  SharedMemView<DoubleType***>& deriv)
-{
-  for (int  j = 0; j < npts; ++j) {
-    int k  = j*3;
-
-    const DoubleType r  = intgLoc[k];
-    const DoubleType s  = intgLoc[k+1];
-    const DoubleType t  = 1.0 - r - s;
-    const DoubleType xi = intgLoc[k + 2];
-
-    deriv(j,0,0) = -0.5 * (1.0 - xi);  // d(N_1)/ d(r)  = deriv[0]
-    deriv(j,0,1) = -0.5 * (1.0 - xi);  // d(N_1)/ d(s)  = deriv[1]
-    deriv(j,0,2) = -0.5 * t;           // d(N_1)/ d(xi) = deriv[2]
-
-    deriv(j,1,0) =  0.5 * (1.0 - xi);  // d(N_2)/ d(r)  = deriv[0 + 3]
-    deriv(j,1,1) =  0.0;               // d(N_2)/ d(s)  = deriv[1 + 3]
-    deriv(j,1,2) = -0.5 * r;           // d(N_2)/ d(xi) = deriv[2 + 3]
-
-    deriv(j,2,0) =  0.0;               // d(N_3)/ d(r)  = deriv[0 + 6]
-    deriv(j,2,1) =  0.5 * (1.0 - xi);  // d(N_3)/ d(s)  = deriv[1 + 6]
-    deriv(j,2,2) = -0.5 * s;           // d(N_3)/ d(xi) = deriv[2 + 6]
-
-    deriv(j,3,0) = -0.5 * (1.0 + xi);  // d(N_4)/ d(r)  = deriv[0 + 9]
-    deriv(j,3,1) = -0.5 * (1.0 + xi);  // d(N_4)/ d(s)  = deriv[1 + 9]
-    deriv(j,3,2) =  0.5 * t;           // d(N_4)/ d(xi) = deriv[2 + 9]
-
-    deriv(j,4,0) =  0.5 * (1.0 + xi);  // d(N_5)/ d(r)  = deriv[0 + 12]
-    deriv(j,4,1) =  0.0;               // d(N_5)/ d(s)  = deriv[1 + 12]
-    deriv(j,4,2) =  0.5 * r;           // d(N_5)/ d(xi) = deriv[2 + 12]
-
-    deriv(j,5,0) =  0.0;               // d(N_6)/ d(r)  = deriv[0 + 15]
-    deriv(j,5,1) =  0.5 * (1.0 + xi);  // d(N_6)/ d(s)  = deriv[1 + 15]
-    deriv(j,5,2) =  0.5 * s;           // d(N_6)/ d(xi) = deriv[2 + 15]
-  }
-}
-
 
 void WedSCS::grad_op(
   SharedMemView<DoubleType**>& coords,
