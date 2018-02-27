@@ -678,22 +678,22 @@ LowMachEquationSystem::solve_and_update()
     // continuity assemble, load_complete and solve
     continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
 
-    // // update pressure
-    // timeA = NaluEnv::self().nalu_time();
-    // field_axpby(
-    //     realm_.meta_data(),
-    //     realm_.bulk_data(),
-    //     1.0, *continuityEqSys_->pTmp_,
-    //     1.0, *continuityEqSys_->pressure_,
-    //     realm_.get_activate_aura());
-    // timeB = NaluEnv::self().nalu_time();
-    // continuityEqSys_->timerAssemble_ += (timeB-timeA);
-
     // update pressure
     timeA = NaluEnv::self().nalu_time();
-    pressureCopyAlg->execute();
+    field_axpby(
+        realm_.meta_data(),
+        realm_.bulk_data(),
+        1.0, *continuityEqSys_->pTmp_,
+        1.0, *continuityEqSys_->pressure_,
+        realm_.get_activate_aura());
     timeB = NaluEnv::self().nalu_time();
     continuityEqSys_->timerAssemble_ += (timeB-timeA);
+
+    // // update pressure
+    // timeA = NaluEnv::self().nalu_time();
+    // pressureCopyAlg->execute();
+    // timeB = NaluEnv::self().nalu_time();
+    // continuityEqSys_->timerAssemble_ += (timeB-timeA);
     
 
     // compute mdot
@@ -901,6 +901,41 @@ LowMachEquationSystem::project_nodal_velocity()
       }
     }
   }
+
+  {
+  // selector and node_buckets (only projected nodes)
+  auto * part = realm_.meta_data().get_part("terrain") ;
+  stk::mesh::Selector wall_projected_nodes
+      = ( stk::mesh::Selector(*part) &
+          stk::mesh::selectField(*dpdx) );
+  stk::mesh::BucketVector const& p_node_buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, wall_projected_nodes );
+  
+  // process loop
+  for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
+        ib != p_node_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * uNp1 = stk::mesh::field_data(velocityNp1, b);
+    double * ut = stk::mesh::field_data(*uTmp, b);
+    double * dp = stk::mesh::field_data(*dpdx, b);
+    double * rho = stk::mesh::field_data(densityNp1, b);
+    
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      
+      // Get scaling factor
+      const double fac = projTimeScale/rho[k];
+      
+      // projection step
+      const size_t offSet = k*nDim;
+      for ( int j = 0; j < 2; ++j ) {
+        const double gdpx = dp[offSet+j] - ut[offSet+j];
+        uNp1[offSet+j] -= fac*gdpx;
+      }
+    }
+  }
+  }
+  
 }
 
 void
@@ -1692,8 +1727,8 @@ MomentumEquationSystem::register_wall_bc(
   const bool anyWallFunctionActivated = wallFunctionApproach || ablWallFunctionApproach;
 
   // push mesh part
-  if ( !anyWallFunctionActivated )
-    notProjectedPart_.push_back(part);
+//  if ( !anyWallFunctionActivated )
+  notProjectedPart_.push_back(part);
 
   // algorithm type
   const AlgorithmType algType = WALL;
@@ -2811,20 +2846,20 @@ ContinuityEquationSystem::register_wall_bc(
     }
   }
 
-  // lhs
-  if ( !elementContinuityEqs_ ) {
-      // solver; lhs
-      std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi =
-          solverAlgDriver_->solverAlgMap_.find(algType);
-      if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
-          AssembleContinuityEdgeWallSolverAlgorithm *theAlg
-              = new AssembleContinuityEdgeWallSolverAlgorithm(realm_, part, this);
-          solverAlgDriver_->solverAlgMap_[algType] = theAlg;
-      }
-      else {
-          itsi->second->partVec_.push_back(part);
-      }
-  }
+//  lhs
+  // if ( !elementContinuityEqs_ ) {
+  //     // solver; lhs
+  //     std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi =
+  //         solverAlgDriver_->solverAlgMap_.find(algType);
+  //     if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
+  //         AssembleContinuityEdgeWallSolverAlgorithm *theAlg
+  //             = new AssembleContinuityEdgeWallSolverAlgorithm(realm_, part, this);
+  //         solverAlgDriver_->solverAlgMap_[algType] = theAlg;
+  //     }
+  //     else {
+  //         itsi->second->partVec_.push_back(part);
+  //     }
+  // }
   
 }
 

@@ -75,6 +75,10 @@ MomentumBoussinesqSrcNodeSuppAlg::node_execute(
   const double temperature = *stk::mesh::field_data(*temperature_, node );
   const double dualVolume = *stk::mesh::field_data(*dualNodalVolume_, node );
   const double fac = -rhoRef_*beta_*(temperature - tRef_)*dualVolume;
+  auto nodeID = realm_.bulk_data().identifier(node);
+  if (nodeID == 5)
+      std::cerr << "Boussinesq: " << temperature << "\t"
+                << tRef_ << "\t" << fac << std::endl;
   for ( int i = 0; i < nDim_; ++i ) {
     rhs[i] += fac*gravity_[i];
   }

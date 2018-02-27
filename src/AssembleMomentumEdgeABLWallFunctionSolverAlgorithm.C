@@ -240,7 +240,7 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
         L = - sgnq * std::max(1.0e-10,std::abs(L));
 
         //const double theta_star = -TfluxBip / utau;
-        //need TBip from temperature field - this is T(yp);
+          //need TBip from temperature field - this is T(yp);
         //const double Tsurf = TBip - theta_star/kappa_*(alpha_h_*std::log(yp/z0_) + gamma_h_*yp/L);
         // evaluate rhosurf = f(Tsurf) and use rhosurf in place of rhoBip below
         double lambda = (rhoBip*kappa_*utau/(std::log(yp/z0_) - p_ABLProfFun->velocity(yp/L))) * aMag;

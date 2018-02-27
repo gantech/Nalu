@@ -196,6 +196,9 @@ AssembleContinuityEdgeWallSolverAlgorithm::execute()
         stk::mesh::Entity nodeL = elem_node_rels[opposingNode];
         stk::mesh::Entity nodeR = elem_node_rels[nearestNode];
 
+        auto nodeRID = realm_.bulk_data().identifier(nodeR);
+        auto nodeLID = realm_.bulk_data().identifier(nodeL);
+
         // extract nodal fields
         const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
         const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
@@ -207,6 +210,7 @@ AssembleContinuityEdgeWallSolverAlgorithm::execute()
         // nearest nodes
         const double * GpdxR        =  stk::mesh::field_data(*Gpdx_, nodeR );
         const double * vrtmR        =  stk::mesh::field_data(*velocityRTM_, nodeR );
+        const double * vrtmL        =  stk::mesh::field_data(*velocityRTM_, nodeL );
         const double densityR       = *stk::mesh::field_data(densityNp1, nodeR );
 
         // offset for bip area vector
@@ -227,27 +231,40 @@ AssembleContinuityEdgeWallSolverAlgorithm::execute()
         const double rhoBip = densityR;
 
         //  mdot
-        const double pstabFac = 1.0;
-        double tmdot = 0.0 ; //-projTimeScale*(pressureR-pressureIp)*asq*inv_axdx*pstabFac;
+        // const double pstabFac = 0.0;
+        // double tmdot = -projTimeScale*(0.0-pressureIp)*asq*inv_axdx*pstabFac;
         // for ( int j = 0; j < nDim; ++j ) {
         //   const double axj = areaVec[faceOffSet+j];
         //   const double coordIp = 0.5*(coordR[j] + coordL[j]);
         //   const double dxj = coordR[j]  - coordIp;
         //   const double kxj = axj - asq*inv_axdx*dxj;
         //   const double Gjp = GpdxR[j];
-        //   tmdot += (rhoBip*vrtmR[j]+projTimeScale*Gjp*pstabFac)*axj
+        //   tmdot += ( -rhoBip*(vrtmR[j]+vrtmL[j])*0.5 + rhoBip*vrtmR[j] + projTimeScale*Gjp*pstabFac)*axj
         //     - projTimeScale*kxj*Gjp*nocFac*pstabFac;
         // }
 
         // rhs
-        p_rhs[nearestNode] -= tmdot/projTimeScale;
+//        p_rhs[nearestNode] -= tmdot/projTimeScale;
+//        p_rhs[nearestNode] -= -1.09486e-13 * 0.25 ;
 
         // lhs right; IR, IL; IR, IR
         double lhsfac = asq*inv_axdx;
-        p_lhs[rowR+nearestNode] += 1000.0;
-        p_lhs[rowR+opposingNode] -= 1000.0;
-      }
+        p_lhs[rowR+nearestNode] += 0.5*lhsfac;
+        p_lhs[rowR+opposingNode] -= 0.5*lhsfac;
 
+        // if (nodeLID == 5)
+        //     std::cerr << "NodeL: " << nodeLID << "\t"
+        //               << nodeRID << "\t"
+        //               << p_rhs[nearestNode] << "\t" 
+        //               << vrtmR[0] << "\t" << vrtmR[1] << "\t" << vrtmR[2] << std::endl;      
+        // if (nodeRID == 5)
+        //     std::cerr << "NodeR: " << nodeLID << "\t"
+        //               << nodeRID << "\t"
+        //               << p_rhs[nearestNode] << "\t"
+        //               << vrtmR[0] << "\t" << vrtmR[1] << "\t" << vrtmR[2] << std::endl;      
+
+      }
+      
       apply_coeff(connected_nodes, scratchIds, scratchVals, rhs, lhs, __FILE__);
 
     }

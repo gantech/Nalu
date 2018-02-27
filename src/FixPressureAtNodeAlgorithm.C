@@ -57,7 +57,7 @@ FixPressureAtNodeAlgorithm::execute()
     initialize();
 
   // Reset LHS and RHS for this matrix
-  //  eqSystem_->linsys_->resetRows(refNodeList_, 0, 1);
+  eqSystem_->linsys_->resetRows(refNodeList_, 0, 1);
 
   int numNodes = refNodeList_.size();
   ThrowAssertMsg(numNodes <= 1,
@@ -72,8 +72,8 @@ FixPressureAtNodeAlgorithm::execute()
     stk::mesh::Entity node = refNodeList_[0];
     const double pressureN = *stk::mesh::field_data(*pressure_, node);
 
-    lhs[0] = -0.06; // Set diagonal entry to 1.0
-    rhs[0] = -0.06*info_.refPressure_ ; //- pressureN;
+    lhs[0] = 1.0; // Set diagonal entry to 1.0
+    rhs[0] = info_.refPressure_ - pressureN;
 
     apply_coeff(refNodeList_, scratchIds, scratchVals, rhs, lhs, __FILE__);
   }

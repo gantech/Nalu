@@ -140,6 +140,8 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       // left and right nodes
       stk::mesh::Entity nodeL = edge_node_rels[0];
       stk::mesh::Entity nodeR = edge_node_rels[1];
+      auto nodeRID = realm_.bulk_data().identifier(nodeR);
+      auto nodeLID = realm_.bulk_data().identifier(nodeL);
 
       connected_nodes[0] = nodeL;
       connected_nodes[1] = nodeR;
@@ -174,7 +176,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       const double rhoIp = 0.5*(densityR + densityL);
 
       //  mdot
-      double tmdot = 0.0; //-projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
+      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
       for ( int j = 0; j < nDim; ++j ) {
         const double axj = p_areaVec[j];
         const double dxj = coordR[j] - coordL[j];
@@ -196,12 +198,31 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       p_lhs[0] = -lhsfac;
       p_lhs[1] = +lhsfac;
       p_rhs[0] = -tmdot/projTimeScale;
-
+  
       // now right
       p_lhs[2] = +lhsfac;
       p_lhs[3] = -lhsfac;
       p_rhs[1] = tmdot/projTimeScale;
 
+      if (nodeLID == 5)
+          std::cerr << "NodeL: " << nodeLID << "\t"
+                    << nodeRID << "\t"
+                    << p_lhs[0] << "\t"
+                    << p_lhs[1] << "\t"
+                    << p_lhs[2] << "\t"
+                    << p_lhs[3] << "\t" << p_rhs[0] << "\t" << p_rhs[1] << "\t"
+                    << vrtmL[0] << "\t" << vrtmL[1] << "\t" << vrtmL[2] << "\t"
+                    << vrtmR[0] << "\t" << vrtmR[1] << "\t" << vrtmR[2] << std::endl;      
+      if (nodeRID == 5)
+          std::cerr << "NodeR: " << nodeLID << "\t"
+                    << nodeRID << "\t"
+                    << p_lhs[0] << "\t"
+                    << p_lhs[1] << "\t"
+                    << p_lhs[2] << "\t"
+                    << p_lhs[3] << "\t" << p_rhs[0] << "\t" << p_rhs[1] << "\t"
+                    << vrtmL[0] << "\t" << vrtmL[1] << "\t" << vrtmL[2] << "\t"
+                    << vrtmR[0] << "\t" << vrtmR[1] << "\t" << vrtmR[2] << std::endl;      
+      
       apply_coeff(connected_nodes, scratchIds, scratchVals, rhs, lhs, __FILE__);
 
     }

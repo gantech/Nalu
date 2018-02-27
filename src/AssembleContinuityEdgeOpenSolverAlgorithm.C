@@ -120,15 +120,15 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
     &stk::mesh::selectUnion(partVec_);
 
-  std::vector<stk::mesh::Entity> refNodeList(1);
-  stk::mesh::BucketVector const& node_buckets =
-      realm_.get_buckets( stk::topology::NODE_RANK, stk::mesh::selectUnion(partVec_));
-  for (auto b: node_buckets) {
-      for (int in=0; in < b->size(); in++) {
-          refNodeList[0] = (*b)[in];
-          eqSystem_->linsys_->resetRows(refNodeList, 0, 1);
-      }
-  }
+  // std::vector<stk::mesh::Entity> refNodeList(1);
+  // stk::mesh::BucketVector const& node_buckets =
+  //     realm_.get_buckets( stk::topology::NODE_RANK, stk::mesh::selectUnion(partVec_));
+  // for (auto b: node_buckets) {
+  //     for (int in=0; in < b->size(); in++) {
+  //         refNodeList[0] = (*b)[in];
+  //         eqSystem_->linsys_->resetRows(refNodeList, 0, 1);
+  //     }
+  // }
 
   stk::mesh::BucketVector const& face_buckets =
     realm_.get_buckets( meta_data.side_rank(), s_locally_owned_union);
@@ -242,16 +242,16 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         const double rhoBip = densityR;
 
         //  mdot
-        double tmdot = 0.0; //-projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac - mdotCorrection;
-        // for ( int j = 0; j < nDim; ++j ) {
-        //   const double axj = areaVec[faceOffSet+j];
-        //   const double coordIp = 0.5*(coordR[j] + coordL[j]);
-        //   const double dxj = coordR[j]  - coordIp;
-        //   const double kxj = axj - asq*inv_axdx*dxj;
-        //   const double Gjp = GpdxR[j];
-        //   tmdot += (rhoBip*vrtmR[j]+projTimeScale*Gjp*pstabFac)*axj
-        //     - projTimeScale*kxj*Gjp*nocFac*pstabFac;
-        // }
+        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac - mdotCorrection;
+        for ( int j = 0; j < nDim; ++j ) {
+          const double axj = areaVec[faceOffSet+j];
+          const double coordIp = 0.5*(coordR[j] + coordL[j]);
+          const double dxj = coordR[j]  - coordIp;
+          const double kxj = axj - asq*inv_axdx*dxj;
+          const double Gjp = GpdxR[j];
+          tmdot += (rhoBip*vrtmR[j]+projTimeScale*Gjp*pstabFac)*axj
+            - projTimeScale*kxj*Gjp*nocFac*pstabFac;
+        }
 
         // rhs
         p_rhs[nearestNode] -= tmdot/projTimeScale;

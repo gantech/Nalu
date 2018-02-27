@@ -91,15 +91,16 @@ MomentumCoriolisSrcNodeSuppAlg::node_execute(
   const double fac2 = rhoNp1*dualVolume;
   rhs[0] += fac2*ax;
   rhs[1] += fac2*ay;
-  rhs[2] += fac2*az;
+//  rhs[2] += fac2*az;
+  rhs[2] += 0.0;
 
   // Only the off-diagonal LHS entries are non-zero
   lhs[1] += fac2*cor_.Jxy_;
-  lhs[2] += fac2*cor_.Jxz_;
+//  lhs[2] += fac2*cor_.Jxz_;
   lhs[3] -= fac2*cor_.Jxy_; // Jyx = - Jxy
-  lhs[5] += fac2*cor_.Jyz_;
-  lhs[6] -= fac2*cor_.Jxz_; // Jzx = - Jxz
-  lhs[7] -= fac2*cor_.Jyz_; // Jzy = - Jyz
+//  lhs[5] += fac2*cor_.Jyz_;
+//  lhs[6] -= fac2*cor_.Jxz_; // Jzx = - Jxz
+//  lhs[7] -= fac2*cor_.Jyz_; // Jzy = - Jyz
 
 }
 
