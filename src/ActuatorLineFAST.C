@@ -268,7 +268,7 @@ void ActuatorLineFAST::readTurbineData(int iTurb, fast::fastInputs & fi, YAML::N
     get_required(turbNode, "fast_input_filename", fi.globTurbineData[iTurb].FASTInputFileName);
     get_required(turbNode, "restart_filename", fi.globTurbineData[iTurb].FASTRestartFileName);
     if (turbNode["turbine_base_pos"].IsSequence() ) {
-        fi.globTurbineData[iTurb].TurbineBasePos = turbNode["turbine_base_pos"].as<std::vector<double> >() ;
+        fi.globTurbineData[iTurb].TurbineBasePos = turbNode["turbine_base_pos"].as<std::vector<float> >() ;
     }
     if (turbNode["turbine_hub_pos"].IsSequence() ) {
         fi.globTurbineData[iTurb].TurbineHubPos = turbNode["turbine_hub_pos"].as<std::vector<double> >() ;
@@ -435,10 +435,10 @@ void ActuatorLineFAST::predict_struct_time_step() {
 
         if ( FAST.isTimeZero() ) {
             FAST.solution0();
+        } else {
+            //Updates states to the next time step in OpenFAST
+            for(int j=0; j < tStepRatio_; j++) FAST.update_states();
         }
-
-        //Predict states at the next time step in OpenFAST
-        for(int j=0; j < tStepRatio_; j++) FAST.predict_states();
     }
     
 }
@@ -449,7 +449,7 @@ void ActuatorLineFAST::advance_struct_time_step() {
     if ( ! FAST.isDryRun() ) {
 
         //Move OpenFAST to next time step
-        for(int j=0; j < tStepRatio_; j++) FAST.move_to_next_time_step();
+        for(int j=0; j < tStepRatio_; j++) FAST.advance_to_next_time_step();
     }
     
 }
@@ -556,7 +556,7 @@ void
 ActuatorLineFAST::execute()
 {
 
-  FAST.extrapolate_vel_force_node_data(); //Predict the location and force at the actuator points at time step 'n+1'
+  FAST.predict_states(); //Predict the location and force at the actuator points at time step 'n+1'
     
   update(); //Move the actuator points to the predicted location and do search, ghosting etc.
     
