@@ -904,9 +904,9 @@ LowMachEquationSystem::project_nodal_velocity()
 
   {
   // selector and node_buckets (only projected nodes)
-  auto * part = realm_.meta_data().get_part("terrain") ;
+  auto * wallPart = realm_.meta_data().get_part("lower") ;
   stk::mesh::Selector wall_projected_nodes
-      = ( stk::mesh::Selector(*part) &
+      = ( stk::mesh::Selector(*wallPart) &
           stk::mesh::selectField(*dpdx) );
   stk::mesh::BucketVector const& p_node_buckets =
     realm_.get_buckets( stk::topology::NODE_RANK, wall_projected_nodes );
@@ -935,6 +935,42 @@ LowMachEquationSystem::project_nodal_velocity()
     }
   }
   }
+
+
+  {
+  // selector and node_buckets (only projected nodes)
+  auto * upperPart = realm_.meta_data().get_part("upper") ;
+  stk::mesh::Selector upper_projected_nodes
+      = ( stk::mesh::Selector(*upperPart) &
+          stk::mesh::selectField(*dpdx) );
+  stk::mesh::BucketVector const& p_node_buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, upper_projected_nodes );
+  
+  // process loop
+  for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
+        ib != p_node_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * uNp1 = stk::mesh::field_data(velocityNp1, b);
+    double * ut = stk::mesh::field_data(*uTmp, b);
+    double * dp = stk::mesh::field_data(*dpdx, b);
+    double * rho = stk::mesh::field_data(densityNp1, b);
+    
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      
+      // Get scaling factor
+      const double fac = projTimeScale/rho[k];
+      
+      // projection step
+      const size_t offSet = k*nDim;
+      for ( int j = 0; j < 2; ++j ) {
+        const double gdpx = dp[offSet+j] - ut[offSet+j];
+        uNp1[offSet+j] -= fac*gdpx;
+      }
+    }
+  }
+  }
+  
   
 }
 
@@ -1979,6 +2015,10 @@ MomentumEquationSystem::register_symmetry_bc(
   const SymmetryBoundaryConditionData &/*symmetryBCData*/)
 {
 
+
+  // push mesh part
+  notProjectedPart_.push_back(part);
+    
   // algorithm type
   const AlgorithmType algType = SYMMETRY;
 
