@@ -11,6 +11,7 @@
 #include <Realm.h>
 #include <SolutionOptions.h>
 #include <SupplementalAlgorithm.h>
+#include <wind_energy/BdyLayerStatistics.h>
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/Entity.hpp>
@@ -34,6 +35,7 @@ MomentumBoussinesqSrcNodeSuppAlg::MomentumBoussinesqSrcNodeSuppAlg(
   : SupplementalAlgorithm(realm),
     temperature_(NULL),
     dualNodalVolume_(NULL),
+    coordinates_(NULL),   
     tRef_(298.0),
     rhoRef_(1.0),
     beta_(1.0),
@@ -43,7 +45,7 @@ MomentumBoussinesqSrcNodeSuppAlg::MomentumBoussinesqSrcNodeSuppAlg(
   stk::mesh::MetaData & meta_data = realm_.meta_data();
   temperature_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "temperature");
   dualNodalVolume_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
-
+  coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name()); 
   // extract user parameters from solution options
   tRef_ = realm_.solutionOptions_->referenceTemperature_;
   rhoRef_ = realm_.solutionOptions_->referenceDensity_;
@@ -74,11 +76,12 @@ MomentumBoussinesqSrcNodeSuppAlg::node_execute(
   // no lhs contribution; all rhs source term; density should be constant...
   const double temperature = *stk::mesh::field_data(*temperature_, node );
   const double dualVolume = *stk::mesh::field_data(*dualNodalVolume_, node );
-  const double fac = -rhoRef_*beta_*(temperature - tRef_)*dualVolume;
+  const double * coordNode = stk::mesh::field_data(*coordinates_, node);  
+  double tAvg = 0.0;
+  realm_.bdyLayerStats_->temperature(coordNode[2], &tAvg);
+//  std::cerr << "tAvg at height " << coordNode[2] <<  " = " << tAvg << std::endl ;
+  const double fac = -rhoRef_*beta_*(temperature - tAvg)*dualVolume;
   auto nodeID = realm_.bulk_data().identifier(node);
-  if (nodeID == 5)
-      std::cerr << "Boussinesq: " << temperature << "\t"
-                << tRef_ << "\t" << fac << std::endl;
   for ( int i = 0; i < nDim_; ++i ) {
     rhs[i] += fac*gravity_[i];
   }
