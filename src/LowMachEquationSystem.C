@@ -92,6 +92,7 @@
 #include <Simulation.h>
 #include <SolutionOptions.h>
 #include <SolverAlgorithmDriver.h>
+#include <TurbViscWallAlgorithm.h>
 #include <TurbViscKsgsAlgorithm.h>
 #include <TurbViscSmagorinskyAlgorithm.h>
 #include <TurbViscSSTAlgorithm.h>
@@ -1928,6 +1929,37 @@ MomentumEquationSystem::register_wall_bc(
       }
       else {
         it_utau->second->partVec_.push_back(part);
+      }
+
+      ScalarFieldType *tviscBcField = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "tvisc_wall"));
+      stk::mesh::put_field(*tviscBcField, *part);
+      ScalarFieldType *dualNodalAreaBcField = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_area_wall"));
+      stk::mesh::put_field(*dualNodalAreaBcField, *part);
+
+      std::map<AlgorithmType, Algorithm *>::iterator it_tv =
+          tviscAlgDriver_->algMap_.find(wfAlgType);
+      if ( it_tv == tviscAlgDriver_->algMap_.end() ) {
+          Algorithm * theAlg = NULL;
+          switch (realm_.solutionOptions_->turbulenceModel_ ) {
+          case KSGS:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case SMAGORINSKY:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case WALE:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case SST: case SST_DES:
+              throw std::runtime_error("non-supported turb model");
+              break;
+          default:
+              throw std::runtime_error("non-supported turb model");
+          }
+          tviscAlgDriver_->algMap_[algType] = theAlg;
+      }
+      else {
+          it_tv->second->partVec_.push_back(part);
       }
 
       // create lhs/rhs algorithm; generalized for edge (nearest node usage) and element
