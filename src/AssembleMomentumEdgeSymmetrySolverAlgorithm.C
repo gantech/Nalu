@@ -319,7 +319,7 @@ AssembleMomentumEdgeSymmetrySolverAlgorithm::execute()
   
   std::vector<stk::mesh::Entity> refNodeList(1);
   stk::mesh::BucketVector const& node_buckets =
-      realm_.get_buckets( stk::topology::NODE_RANK, stk::mesh::selectUnion(partVec_));
+      realm_.get_buckets( stk::topology::NODE_RANK, meta_data.locally_owned_part() & stk::mesh::selectUnion(partVec_));
   for (auto b: node_buckets) {
       for (int in=0; in < b->size(); in++) {
           refNodeList[0] = (*b)[in];

@@ -15,6 +15,7 @@
 #include <Realm.h>
 #include <master_element/MasterElement.h>
 #include <ABLProfileFunction.h>
+#include "wind_energy/BdyLayerVelocitySampler.h"
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -45,7 +46,8 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::AssembleMomentumEdgeABLWallF
   EquationSystem *eqSystem,
   const double &gravity,
   const double &z0,
-  const double &Tref)
+  const double &Tref,
+  BdyLayerVelocitySampler* velocitySampler)
   : SolverAlgorithm(realm, part, eqSystem),
     z0_(z0), 
     Tref_(Tref), 
@@ -55,7 +57,8 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::AssembleMomentumEdgeABLWallF
     beta_h_(16.0),
     gamma_m_(5.0),
     gamma_h_(5.0),
-    kappa_(realm.get_turb_model_constant(TM_kappa))
+    kappa_(realm.get_turb_model_constant(TM_kappa)),
+    velocitySampler_(velocitySampler)
 {
   // save off fields
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -94,6 +97,8 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
   stk::mesh::MetaData & meta_data = realm_.meta_data();
 
   const int nDim = meta_data.spatial_dimension();
+  const bool useAltLESModel = (velocitySampler_ != nullptr);
+  const double lesLHSFac = useAltLESModel ? 0.0 : 1.0;
 
   // space for LHS/RHS; nodesPerFace*nDim*nodesPerFace*nDim and nodesPerFace*nDim
   std::vector<double> lhs;
@@ -106,6 +111,7 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
   std::vector<double> uBip(nDim);
   std::vector<double> uBcBip(nDim);
   std::vector<double> unitNormal(nDim);
+  std::vector<double> velTemp(nDim);
 
   // pointers to fixed values
   double *p_uBip = &uBip[0];
@@ -192,11 +198,21 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
         double rhoBip =  *stk::mesh::field_data(*density_, nodeR);
         double CpBip =  *stk::mesh::field_data(*specificHeat_, nodeR);
 
+        // if (velocitySampler_ != nullptr) {
+        //   velocitySampler_->get_velocity(nodeR, velTemp.data());
+        //   std::cerr << velTemp[0] << "\t" << velTemp[1] << "\t" << velTemp[2] << std::endl;
+        // }
+
         for ( int j = 0; j < nDim; ++j ) {
           const double *uNp1 = stk::mesh::field_data(velocityNp1, nodeR);
           const double *uBc = stk::mesh::field_data(*bcVelocity_, nodeR);
           p_uBip[j] = uNp1[j];
           p_uBcBip[j] = uBc[j];
+        }
+
+        // Reset "nodal velocity" if we are using the alternate LES model
+        if (useAltLESModel) {
+          velocitySampler_->get_velocity(nodeR, p_uBip);
         }
 
         // form unit normal
@@ -259,12 +275,12 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
               const double om_nini = 1.0 - ninj;
               uiTan += om_nini*p_uBip[j];
               uiBcTan += om_nini*p_uBcBip[j];
-              p_lhs[rowR+localFaceNode*nDim+i] += lambda*om_nini;
+              p_lhs[rowR+localFaceNode*nDim+i] += lesLHSFac * lambda*om_nini;
             }
             else {
               uiTan -= ninj*p_uBip[j];
               uiBcTan -= ninj*p_uBcBip[j];
-              p_lhs[rowR+localFaceNode*nDim+j] -= lambda*ninj;
+              p_lhs[rowR+localFaceNode*nDim+j] -= lesLHSFac * lambda*ninj;
             }
           }
           p_rhs[indexR] -= lambda*(uiTan-uiBcTan);
@@ -280,7 +296,7 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
   
   std::vector<stk::mesh::Entity> refNodeList(1);
   stk::mesh::BucketVector const& node_buckets =
-      realm_.get_buckets( stk::topology::NODE_RANK, stk::mesh::selectUnion(partVec_));
+      realm_.get_buckets( stk::topology::NODE_RANK, meta_data.locally_owned_part() & stk::mesh::selectUnion(partVec_));
   for (auto b: node_buckets) {
       for (int in=0; in < b->size(); in++) {
           refNodeList[0] = (*b)[in];
