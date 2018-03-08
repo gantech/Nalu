@@ -167,6 +167,7 @@
 #include <overset/UpdateOversetFringeAlgorithmDriver.h>
 
 #include <user_functions/OneTwoTenVelocityAuxFunction.h>
+#include <wind_energy/BdyLayerVelocitySampler.h>
 
 // deprecated
 #include <ContinuityMassElemSuppAlgDep.h>
@@ -905,12 +906,11 @@ LowMachEquationSystem::project_nodal_velocity()
 
   {
   // selector and node_buckets (only projected nodes)
-  auto * wallPart = realm_.meta_data().get_part("lower") ;
-  stk::mesh::Selector wall_projected_nodes
-      = ( stk::mesh::Selector(*wallPart) &
-          stk::mesh::selectField(*dpdx) );
+  stk::mesh::Selector notw_projected_nodes
+      = (stk::mesh::selectUnion(momentumEqSys_->notWProjectedPart_)) &
+      stk::mesh::selectField(*dpdx);
   stk::mesh::BucketVector const& p_node_buckets =
-    realm_.get_buckets( stk::topology::NODE_RANK, wall_projected_nodes );
+    realm_.get_buckets( stk::topology::NODE_RANK, notw_projected_nodes );
   
   // process loop
   for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
@@ -936,42 +936,6 @@ LowMachEquationSystem::project_nodal_velocity()
     }
   }
   }
-
-
-  {
-  // selector and node_buckets (only projected nodes)
-  auto * upperPart = realm_.meta_data().get_part("upper") ;
-  stk::mesh::Selector upper_projected_nodes
-      = ( stk::mesh::Selector(*upperPart) &
-          stk::mesh::selectField(*dpdx) );
-  stk::mesh::BucketVector const& p_node_buckets =
-    realm_.get_buckets( stk::topology::NODE_RANK, upper_projected_nodes );
-  
-  // process loop
-  for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
-        ib != p_node_buckets.end() ; ++ib ) {
-    stk::mesh::Bucket & b = **ib ;
-    const stk::mesh::Bucket::size_type length   = b.size();
-    double * uNp1 = stk::mesh::field_data(velocityNp1, b);
-    double * ut = stk::mesh::field_data(*uTmp, b);
-    double * dp = stk::mesh::field_data(*dpdx, b);
-    double * rho = stk::mesh::field_data(densityNp1, b);
-    
-    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
-      
-      // Get scaling factor
-      const double fac = projTimeScale/rho[k];
-      
-      // projection step
-      const size_t offSet = k*nDim;
-      for ( int j = 0; j < 2; ++j ) {
-        const double gdpx = dp[offSet+j] - ut[offSet+j];
-        uNp1[offSet+j] -= fac*gdpx;
-      }
-    }
-  }
-  }
-  
   
 }
 
@@ -1764,8 +1728,10 @@ MomentumEquationSystem::register_wall_bc(
   const bool anyWallFunctionActivated = wallFunctionApproach || ablWallFunctionApproach;
 
   // push mesh part
-//  if ( !anyWallFunctionActivated )
-  notProjectedPart_.push_back(part);
+  if ( !anyWallFunctionActivated ) {
+      notWProjectedPart_.push_back(part);
+      notProjectedPart_.push_back(part);      
+  }
 
   // algorithm type
   const AlgorithmType algType = WALL;
@@ -1925,6 +1891,18 @@ MomentumEquationSystem::register_wall_bc(
       if ( it_utau == wallFunctionParamsAlgDriver_->algMap_.end() ) {
         ComputeABLWallFrictionVelocityAlgorithm *theUtauAlg =
           new ComputeABLWallFrictionVelocityAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+
+        if (userData.lesSampleVelocityModel_) {
+          if (realm_.bdyLayerStats_ == nullptr)
+            throw std::runtime_error("MomentumEQS:: LES Sampling at different height requires boundary_layer_statistics turned on.");
+          double refHeight = 0.0;
+          for (int d=0; d < nDim; d++) {
+            refHeight += userData.offsetVector_[d] * userData.offsetVector_[d];
+          }
+          refHeight = std::sqrt(refHeight);
+          theUtauAlg->useLESSamplingHeight_ = true;
+          theUtauAlg->lesModelRefHeight_ = refHeight;
+        }
         wallFunctionParamsAlgDriver_->algMap_[wfAlgType] = theUtauAlg;
       }
       else {
@@ -1933,8 +1911,6 @@ MomentumEquationSystem::register_wall_bc(
 
       ScalarFieldType *tviscBcField = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "tvisc_wall"));
       stk::mesh::put_field(*tviscBcField, *part);
-      ScalarFieldType *dualNodalAreaBcField = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_area_wall"));
-      stk::mesh::put_field(*dualNodalAreaBcField, *part);
 
       std::map<AlgorithmType, Algorithm *>::iterator it_tv =
           tviscAlgDriver_->algMap_.find(wfAlgType);
@@ -1967,14 +1943,30 @@ MomentumEquationSystem::register_wall_bc(
         solverAlgDriver_->solverAlgMap_.find(wfAlgType);
       if ( it_wf == solverAlgDriver_->solverAlgMap_.end() ) {
         SolverAlgorithm *theAlg = NULL;
-        if ( realm_.realmUsesEdges_ ) {
-          theAlg = new AssembleMomentumEdgeABLWallFunctionSolverAlgorithm(realm_, part, this, 
-                                                                          grav, z0, referenceTemperature);
+        BdyLayerVelocitySampler* velocitySampler = nullptr;
+
+        // Handle LES wall modeling approach
+        if (userData.lesSampleVelocityModel_) {
+          velocitySampler = new BdyLayerVelocitySampler(realm_, userData);
+          equationSystems_.preIterAlgDriver_.push_back(velocitySampler);
+
+          NaluEnv::self().naluOutputP0()
+            << "MomentumEQS:: Activated velocity sampling from user-defined height for LES Wall model" << std::endl;
         }
-        else {
-          theAlg = new AssembleMomentumElemABLWallFunctionSolverAlgorithm(realm_, part, this, realm_.realmUsesEdges_, 
-                                                                          grav, z0, referenceTemperature);     
+
+        if (realm_.realmUsesEdges_) {
+          theAlg = new AssembleMomentumEdgeABLWallFunctionSolverAlgorithm(
+            realm_, part, this, grav, z0, referenceTemperature, velocitySampler);
+        } else {
+          theAlg = new AssembleMomentumElemABLWallFunctionSolverAlgorithm(
+            realm_, part, this, realm_.realmUsesEdges_, grav, z0,
+            referenceTemperature);
         }
+
+        if (userData.lesSampleVelocityModel_) {
+          velocitySampler->set_wall_func_algorithm(theAlg);
+        }
+
         solverAlgDriver_->solverAlgMap_[wfAlgType] = theAlg;
       }
       else {
@@ -2050,6 +2042,7 @@ MomentumEquationSystem::register_symmetry_bc(
 
   // push mesh part
   notProjectedPart_.push_back(part);
+  notWProjectedPart_.push_back(part);
     
   // algorithm type
   const AlgorithmType algType = SYMMETRY;
@@ -2812,10 +2805,15 @@ ContinuityEquationSystem::register_open_bc(
   // register boundary data
   stk::mesh::MetaData &meta_data = realm_.meta_data();
   ScalarFieldType *pressureBC = NULL;
-  // if ( !realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
-  //   pressureBC = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure_bc"));
-  //   stk::mesh::put_field(*pressureBC, *part );
-  // }
+  VectorFieldType *mdotCorrectionNode = NULL;
+  if ( !realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
+    pressureBC = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure_bc"));
+    stk::mesh::put_field(*pressureBC, *part );
+
+    mdotCorrectionNode = &(meta_data.declare_field<VectorFieldType>(stk::topology::NODE_RANK, "mdot_correction_node"));
+    stk::mesh::put_field(*mdotCorrectionNode, *part );
+    
+  }
 
   VectorFieldType &dpdxNone = dpdx_->field_of_state(stk::mesh::StateNone);
   ScalarFieldType &pressureNone = pressure_->field_of_state(stk::mesh::StateNone);
