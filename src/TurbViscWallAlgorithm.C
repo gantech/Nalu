@@ -9,6 +9,7 @@
 // nalu
 #include <TurbViscWallAlgorithm.h>
 #include <Algorithm.h>
+#include <CopyFieldAlgorithm.h>
 #include <FieldTypeDef.h>
 #include <Realm.h>
 #include <master_element/MasterElement.h>
@@ -69,12 +70,15 @@ TurbViscWallAlgorithm::TurbViscWallAlgorithm(
 
   density_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   velocity_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  specificHeat_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "specific_heat");
+  bcHeatFlux_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "heat_flux_bc");  
   tvisc_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "turbulent_viscosity");
   tviscWall_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "tvisc_wall");
   exposedAreaVec_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "exposed_area_vector");
   assembledWallArea_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "assembled_wall_area_wf");
   wallFrictionVelocityBip_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "wall_friction_velocity_bip");
   wallNormalDistanceBip_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "wall_normal_distance_bip");  
+  assembledWallNormalDistance_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "assembled_wall_normal_distance");
   dudx_ = meta_data.get_field<GenericFieldType>(stk::topology::NODE_RANK, "dudx");
 
 }
@@ -203,8 +207,8 @@ TurbViscWallAlgorithm::execute()
         const int offSetT = ni * nDim * nDim ;
         for ( int j=0; j < nDim; ++j ) {
           p_velocityNp1[offSet+j] = uNp1[j];
-          for ( int k=0; j < nDim; ++k) {
-              p_dudx[offSetT + nDim*j + k] = dudx[nDim*j + k];
+          for ( int i=0; i < nDim; ++i) {
+              p_dudx[offSetT + nDim*j + i] = dudx[nDim*j + i];
           }
         }
       }
@@ -221,13 +225,14 @@ TurbViscWallAlgorithm::execute()
         const int offSetSF_face = ip*nodesPerFace;
 
         const int localFaceNode = faceIpNodeMap[ip];
+        stk::mesh::Entity lfNode = face_node_rels[localFaceNode];
 
         // zero out vector quantities; squeeze in aMag
         double aMag = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
           p_uBip[j] = 0.0;
-          for ( int k = 0; k < nDim; ++k )
-              p_dudxBip[j*nDim+k]= 0.0;
+          for ( int i = 0; i < nDim; ++i )
+              p_dudxBip[j*nDim+i]= 0.0;
           const double axj = areaVec[offSetAveraVec+j];
           aMag += axj*axj;
         }
@@ -246,8 +251,8 @@ TurbViscWallAlgorithm::execute()
           const int offSetFNT = ic*nDim*nDim;
           for ( int j = 0; j < nDim; ++j ) {
             p_uBip[j] += r*p_velocityNp1[offSetFN+j];
-            for ( int k = 0; k < nDim; ++k ) {
-                p_dudxBip[j*nDim + k] += r*p_dudx[offSetFNT+j*nDim+k];
+            for ( int i = 0; i < nDim; ++i ) {
+                p_dudxBip[j*nDim + i] += r*p_dudx[offSetFNT+j*nDim+i];
             }
           }
         }
@@ -300,15 +305,13 @@ TurbViscWallAlgorithm::execute()
 
         double tauij_nj_ui = 0.0;
         double sij_nj_ui = 0.0;
-
-        double * tviscWall = stk::mesh::field_data(*tviscWall_, localFaceNode) ;
-        double * assembledWallArea = stk::mesh::field_data(*assembledWallArea_, localFaceNode );
+        
+        double * tviscWall = stk::mesh::field_data(*tviscWall_, lfNode) ;
+        double * assembledWallArea = stk::mesh::field_data(*assembledWallArea_, lfNode );
+        double * assembledWallNormalDistance = stk::mesh::field_data(*assembledWallNormalDistance_, lfNode );
             
         // start the lhs assembly
         for ( int i = 0; i < nDim; ++i ) {
-
-          int indexR = localFaceNode*nDim + i;
-          int rowR = indexR*nodesPerFace*nDim;
 
           double uiTan_i = 0.0;
           for ( int j = 0; j < nDim; ++j ) {
@@ -319,14 +322,32 @@ TurbViscWallAlgorithm::execute()
           tauij_nj_ui += lambda*(uiTan_i)*p_uBip[i];
         }
 
-        *tviscWall += tauij_nj_ui * aMag / (sij_nj_ui * (*assembledWallArea));
-      }
+        if (sij_nj_ui < 0) {
+            sij_nj_ui = 0.0;
+            for (int j = 0; j < nDim; j++)
+                sij_nj_ui += 0.1*p_uBip[j]*p_uBip[j]/(*assembledWallNormalDistance) ;
+        }
+        *tviscWall += tauij_nj_ui * aMag / (sij_nj_ui * (*assembledWallArea));        
+//        *tviscWall += (sij_nj_ui * (*assembledWallArea));
+        std::cerr << " Sij_nj_ui = " << sij_nj_ui <<
+            "\t tauij_nj_ui = " << tauij_nj_ui <<
+            "\t ttvisc = " << tauij_nj_ui * aMag / (sij_nj_ui * (*assembledWallArea)) << std::endl ;
+     }
     }
   }
 
   std::vector<stk::mesh::FieldBase*> sum_fields(1, tviscWall_);
   stk::mesh::parallel_sum(bulk_data, sum_fields);
-  
+
+  for (auto part: partVec_) {
+      CopyFieldAlgorithm *viscWallCopyAlg
+          = new CopyFieldAlgorithm(realm_, part,
+                                   tviscWall_, tvisc_,
+                                   0, 1,
+                                   stk::topology::NODE_RANK);
+      
+      viscWallCopyAlg->execute();
+  }
 }
 
 } // namespace nalu
