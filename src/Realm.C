@@ -4361,6 +4361,31 @@ Realm::augment_transfer_vector(Transfer *transfer, const std::string transferObj
   }
 }
 
+
+//--------------------------------------------------------------------------
+//-------- process_multi_physics_transfer ----------------------------------
+//--------------------------------------------------------------------------
+void
+Realm::process_init_multi_physics_transfer()
+{
+    double timeXfer = -NaluEnv::self().nalu_time();
+
+    // check for actuator line
+    if ( NULL != actuator_ ) {
+        actuator_->sample_vel();
+        actuator_->init_predict_struct_states();
+    }
+
+    if ( !hasMultiPhysicsTransfer_ )
+        return;
+  
+    std::vector<Transfer *>::iterator ii;
+    for( ii=multiPhysicsTransferVec_.begin(); ii!=multiPhysicsTransferVec_.end(); ++ii )
+        (*ii)->execute();
+    timeXfer += NaluEnv::self().nalu_time();
+    timerTransferExecute_ += timeXfer;
+}
+
 //--------------------------------------------------------------------------
 //-------- process_multi_physics_transfer ----------------------------------
 //--------------------------------------------------------------------------
@@ -4451,7 +4476,6 @@ Realm::post_converged_work()
   equationSystems_.post_converged_work();
 
   if ( NULL != actuator_ ) {
-      NaluEnv::self().naluOutput() << "Calling advance_struct_time_step  " << std::endl ;      
       actuator_->advance_struct_time_step();
   }
   

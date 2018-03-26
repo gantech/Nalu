@@ -257,7 +257,6 @@ ActuatorLineFAST::load(
       throw std::runtime_error("Number of turbines <= 0 ");
     }
 
-    FAST.setInputs(fi);
   }
 }
 
@@ -292,9 +291,12 @@ ActuatorLineFAST::setup()
   if (std::abs(dtNalu - tStepRatio_ * fi.dtFAST) < 0.001) {// TODO: Fix arbitrary number 0.001
     NaluEnv::self().naluOutputP0() << "Time step ratio  dtNalu/dtFAST: " << tStepRatio_ << std::endl ;
   } else {
-    throw std::runtime_error("ActuatorLineFAST: Ratio of Nalu's time step is not an integral multiple of FAST time step");
+    throw std::runtime_error("ActuatorLineFAST: Nalu's time step is not an integral multiple of FAST time step");
   }
+  fi.nSubsteps = tStepRatio_; 
+  FAST.setInputs(fi);
 
+  
 }
 
 /** This function searches for the processor containing the hub point of each turbine and allocates the turbine
@@ -433,14 +435,26 @@ void ActuatorLineFAST::predict_struct_time_step() {
 
         FAST.interpolateVel_ForceToVelNodes();
 
-        if ( FAST.isTimeZero() ) {
-            FAST.solution0();
-        } else {
-            //Updates states to the next time step in OpenFAST
-            for(int j=0; j < tStepRatio_; j++) FAST.update_states();
-        }
+        //Updates states to the next CFD time step in OpenFAST
+        FAST.update_states_driver_time_step();
     }
     
+}
+
+// predict the state of OpenFAST at time zero
+void ActuatorLineFAST::init_predict_struct_states() {
+
+    if ( ! FAST.isDryRun() ) {
+
+        FAST.interpolateVel_ForceToVelNodes();
+
+        if ( FAST.isTimeZero() ) {
+            FAST.solution0();
+        }
+
+        update();
+        sample_vel();
+    }
 }
 
 // firmly advance OpenFAST to the next time step
@@ -448,8 +462,8 @@ void ActuatorLineFAST::advance_struct_time_step() {
 
     if ( ! FAST.isDryRun() ) {
 
-        //Move OpenFAST to next time step
-        for(int j=0; j < tStepRatio_; j++) FAST.advance_to_next_time_step();
+        //Move OpenFAST to next CFD time step
+        FAST.advance_to_next_driver_time_step();
     }
     
 }
@@ -623,8 +637,6 @@ ActuatorLineFAST::execute()
     //    ghostFieldVec.push_back(viscosity);
     stk::mesh::communicate_field_data(*actuatorLineGhosting_, ghostFieldVec);
   }
-
-  update();
 
   // reset the thrust and torque from each turbine to zero
   const size_t nTurbinesGlob = FAST.get_nTurbinesGlob() ;

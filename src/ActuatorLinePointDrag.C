@@ -392,6 +392,13 @@ ActuatorLinePointDrag::initialize()
   complete_search();
 }
 
+
+// predict the state of the structural model at time zero
+void ActuatorLinePointDrag::init_predict_struct_states() {
+
+    // Nothing to do here
+}
+
 // predict the state of the structural model at the next time step
 void ActuatorLinePointDrag::predict_struct_time_step() {
 
