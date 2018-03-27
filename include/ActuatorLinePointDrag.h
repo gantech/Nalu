@@ -94,6 +94,9 @@ public:
   // populate vector of elements
   void complete_search();
 
+  // predict initial structural model states
+  void init_predict_struct_states();
+  
   // predict the state of the structural model at the next time step
   void predict_struct_time_step();
 
