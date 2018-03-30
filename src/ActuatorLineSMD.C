@@ -329,14 +329,25 @@ ActuatorLineSMD::update()
 void ActuatorLineSMD:: predict_struct_time_step() {
 
     if ( ! p_smd.isDryRun() )
-        p_smd.step();
+        p_smd.update_states_driver_time_step();
         
+}
+
+// predict the state of OpenFAST at time zero
+void ActuatorLineSMD::init_predict_struct_states() {
+
+    if ( ! p_smd.isDryRun() ) {
+
+        if ( p_smd.isTimeZero() ) {
+            p_smd.solution0();
+        }
+    }
 }
 
 void ActuatorLineSMD:: advance_struct_time_step() {
 
     if ( ! p_smd.isDryRun() )
-        p_smd.advanceStates();
+        p_smd.advance_to_next_driver_time_step();
 }
 
 void ActuatorLineSMD::sample_vel() {
