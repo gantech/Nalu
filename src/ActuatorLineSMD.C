@@ -200,6 +200,7 @@ ActuatorLineSMD::load(
     get_required(y_actuatorLine, "n_every_checkpoint", i_smd.n_every_checkpoint);
     get_required(y_actuatorLine, "dt_smd", i_smd.dt);
     get_required(y_actuatorLine, "t_max", i_smd.t_max); // t_max is the total duration to which you want to run SMD.
+    get_required(y_actuatorLine, "predictor", i_smd.predictor);
 
     // Only one SMD for now
     ActuatorLineSMDInfo *actuatorLineInfo = new ActuatorLineSMDInfo();
@@ -210,8 +211,6 @@ ActuatorLineSMD::load(
       actuatorLineInfo->epsilon_ = epsilon.as<Coordinates>() ;
     else
       throw std::runtime_error("ActuatorLineSMD: lacking epsilon vector");
-
-    p_smd.setInputs(i_smd);
 
   }
 }
@@ -231,6 +230,8 @@ ActuatorLineSMD::setup()
   } else {
     throw std::runtime_error("ActuatorLineSMD: Ratio of Nalu's time step is not an integral multiple of SMD time step");
   }
+  i_smd.n_substeps = tStepRatio_;
+  p_smd.setInputs(i_smd);
 
 }
 
@@ -260,6 +261,8 @@ ActuatorLineSMD::initialize()
       std::vector<double> ws_pointGasVelocity(2);
       ws_pointGasVelocity[0] = 2.0; ws_pointGasVelocity[1] = 0.0; 
       p_smd.setVelocity_n(ws_pointGasVelocity, 0, 0);
+      p_smd.setVelocity_nm1(ws_pointGasVelocity, 0, 0);
+      p_smd.setVelocity_np1(ws_pointGasVelocity, 0, 0);
   }
   p_smd.solution0();
   
@@ -465,7 +468,7 @@ void
 ActuatorLineSMD::execute()
 {
 
-  p_smd.extrapolateStatesVel(); //Predict the velocity and states at time step 'n+1'
+  p_smd.extrapolateStatesVelDriver(); //Predict the velocity and states at time step 'n+1'
   
   update(); //Move the actuator point to the predicted location and do search, ghosting etc. 
 
@@ -549,9 +552,7 @@ ActuatorLineSMD::execute()
 
     p_smd.getForce_np1(ws_pointForce, np, infoObject->globSMDId_);
     NaluEnv::self().naluOutput() << "Predicte force at n+1 is  " << ws_pointForce[1] << std::endl ;
-    double actualForce = - (std::cos(realm_.get_current_time()) + (10.0 - 1.0)*std::sin(realm_.get_current_time())) ;
-    NaluEnv::self().naluOutput() << "Actual force at n+1 is supposed to be " << actualForce << std::endl ;
-                            
+    
     int iTurbGlob = infoObject->globSMDId_;
 
     // Set up the necessary variables to check that forces/projection function are integrating up correctly.

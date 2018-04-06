@@ -96,6 +96,32 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
   DoubleType sin2omegat = stk::math::sin(2.0 * omega_ * cur_time_);
   DoubleType cosomegat = stk::math::cos(omega_ * cur_time_);
 
+  DoubleType us = u_infty_ * (1.0 + alpha_ * sinomegat/sigma_ * stk::math::exp( - alpha_ * sinomegat * alpha_ * sinomegat / (sigma_*sigma_)) );
+  DoubleType aoa = stk::math::atan( -alpha_ * omega_*cosomegat/us );
+  DoubleType aoa_deg = aoa * 180.0/M_PI;
+  DoubleType cl_polyfit[16];
+  cl_polyfit[0] = -4.76967067e-31;
+  cl_polyfit[1] = -2.00718968e-29;
+  cl_polyfit[2] = 6.07390811e-26;
+  cl_polyfit[3] = 2.36792535e-24;
+  cl_polyfit[4] = -3.12374084e-21;
+  cl_polyfit[5] = -1.11110307e-19; 
+  cl_polyfit[6] = 8.31416678e-17;   
+  cl_polyfit[7] = 2.63597939e-15;
+  cl_polyfit[8] = -1.22021153e-12; 
+  cl_polyfit[9] = -3.31592104e-11;  
+  cl_polyfit[10] = 9.78048623e-09;
+  cl_polyfit[11] = 2.10958481e-07;
+  cl_polyfit[12] = -4.05844281e-05;
+  cl_polyfit[13] = -5.79150921e-04;
+  cl_polyfit[14] = 7.25422559e-02;
+  cl_polyfit[15] = 4.47575641e-01;
+  DoubleType cl = cl_polyfit[0];
+  for (int it=0; it < 15; it++)
+      cl = cl + (cl * aoa_deg) + cl_polyfit[it+1];
+
+  DoubleType fsiForce = cl * (us*us + alpha_*alpha_*omega_*omega_*cosomegat*cosomegat) * stk::math::cos(aoa);
+  
   for (int ip=0; ip < AlgTraits::numScvIp_; ++ip) {
 
     // nearest node to ip
@@ -115,8 +141,10 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
     DoubleType y = w_scvCoords[1];
 
     DoubleType yrels = y - alpha_ * sinomegat;
-    DoubleType expfn = stk::math::exp(-(x*x + yrels*yrels)*oneOverSigma2);
-    DoubleType fsiForce = alpha_ * ( omega_*cosomegat*C_ + (K_ - omega_*omega_*M_)*sinomegat ) ;
+    DoubleType expfn = stk::math::exp(-(x*x + y*y)*oneOverSigma2);
+    DoubleType expfn_fsi = stk::math::exp(-(x*x + yrels*yrels)*oneOverSigma2);
+
+
 
     // Compute RHS contributions
     const DoubleType scV = v_scv_volume(ip);
@@ -133,12 +161,17 @@ MomentumSMDSrcElemKernel<AlgTraits>::execute(
 //    rhs(nnNdim + 1) += (u_infty_*(8.*mu_*sigma2*x - 2.*sigma2*u_infty_*x*x - 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y - 4.*mu_*x*y*y + 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y + 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ - 4.*mu_*x)*sinomegat * sinomegat - 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
 
     //Oscillating case - Still no FSI - Flipped vorticity
-    rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn + 8.*mu_*sigma2*y - 4.*mu_*x*x*y - 4.*mu_*y*y*y + alpha_*omega_*sigma2*(-1.*sigma2 + 2.*y*y)*cosomegat - 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat + 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat - 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(-8.*mu_*sigma2 + 4.*mu_*x*x + 12.*mu_*y*y + 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
+    // rhs(nnNdim + 0) += (u_infty_*((-1.*sigma2*sigma_*u_infty_*x) * expfn + 8.*mu_*sigma2*y - 4.*mu_*x*x*y - 4.*mu_*y*y*y + alpha_*omega_*sigma2*(-1.*sigma2 + 2.*y*y)*cosomegat - 12.*alpha_*alpha_*mu_*y*sinomegat * sinomegat + 4.*alpha_*alpha_*alpha_*mu_*sinomegat * sinomegat * sinomegat - 2.*alpha_*alpha_*omega_*sigma2*y*sin2omegat + alpha_*sinomegat*(-8.*mu_*sigma2 + 4.*mu_*x*x + 12.*mu_*y*y + 1.*alpha_*alpha_*omega_*sigma2*sin2omegat))) * expfn * oneOverSigma5 * scV;
 
-    rhs(nnNdim + 1) += (u_infty_*(-2.*sigma2*sigma2*u_infty_ - 8.*mu_*sigma2*x + 2.*sigma2*u_infty_*x*x + 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y + 4.*mu_*x*y*y - 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y - 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ + 4.*mu_*x)*sinomegat * sinomegat + 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
+    // rhs(nnNdim + 1) += (u_infty_*(-2.*sigma2*sigma2*u_infty_ - 8.*mu_*sigma2*x + 2.*sigma2*u_infty_*x*x + 4.*mu_*x*x*x - (1.*sigma2*sigma_*u_infty_*y) * expfn + 2.*sigma2*u_infty_*y*y + 4.*mu_*x*y*y - 2.*alpha_*omega_*sigma2*x*y*cosomegat + alpha_*((1.*sigma2*sigma_*u_infty_) * expfn - 4.*sigma2*u_infty_*y - 8.*mu_*x*y)*sinomegat + alpha_*alpha_*(2.*sigma2*u_infty_ + 4.*mu_*x)*sinomegat * sinomegat + 1.*alpha_*alpha_*omega_*sigma2*x*sin2omegat)) * expfn * oneOverSigma5 * scV;
 
+    // Velocity field is not oscillating - Flipped vorticity
+    rhs(nnNdim + 0) += u_infty_*(-((sigma2*sigma_*u_infty_*x)*expfn) + (8.*mu_*sigma2*y) + (mu_*y*(-4.*x*x - 4.*y*y)) ) * expfn * oneOverSigma5 * scV;
+
+    rhs(nnNdim + 1) += u_infty_*(-((sigma2*sigma_*u_infty_*y)*expfn) + (-2.*sigma2*sigma2*u_infty_ + 4.*mu_*x*x*x + 4.*mu_*x*y*y + sigma2*(-8.*mu_*x + 2.*u_infty_*x*x + 2.*u_infty_*y*y) ) ) * expfn * oneOverSigma5 * scV;
+        
     //Oscillating case - With FSI
-    rhs(nnNdim + 1) += fsiForce * expfn * scV / (sigma_ * sigma_ * M_PI);
+    rhs(nnNdim + 1) += fsiForce * expfn_fsi * scV / (sigma_ * sigma_ * M_PI);
 
     //Didn't work
 //    rhs(nnNdim + 0) += (A_*expfn*oneOverSigma2*(-2*A_*x + 3.*(-(A_*expfn) + u_infty_)*x - 2.*alpha_*omega_*stk::math::cos(omega_*cur_time_)*yrels - (2.*A_*expfn*x*yrels*yrels)*oneOverSigma2 + (2.*(-(A_*expfn) + u_infty_)*x*yrels*yrels)*oneOverSigma2 - mu_*(4.0 - (4.0*x*x)*oneOverSigma2 - (4*yrels*yrels)*oneOverSigma2 - (2*(x + (2*x*yrels*yrels)*oneOverSigma2))/3.)))*scV ;

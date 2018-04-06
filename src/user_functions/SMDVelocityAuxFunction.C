@@ -40,7 +40,7 @@ SMDVelocityAuxFunction::do_evaluate(
   const unsigned /*beginPos*/,
   const unsigned /*endPos*/) const
 {
-  const double ys = alpha_ * std::sin(omega_ * time);
+    const double ys = 0.0; //alpha_ * std::sin(omega_ * time);
   const double oneOverSigma2 =1.0/(sigma_*sigma_);
 
   for(unsigned p=0; p < numPoints; ++p) {
