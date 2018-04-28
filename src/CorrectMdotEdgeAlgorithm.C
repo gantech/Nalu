@@ -7,11 +7,9 @@
 
 
 // nalu
-#include <AssembleContinuityEdgeSolverAlgorithm.h>
-#include <EquationSystem.h>
-#include <SolverAlgorithm.h>
+#include <CorrectMdotEdgeAlgorithm.h>
+
 #include <FieldTypeDef.h>
-#include <LinearSystem.h>
 #include <Realm.h>
 
 // stk_mesh/base/fem
@@ -22,22 +20,24 @@
 #include <stk_mesh/base/MetaData.hpp>
 #include <stk_mesh/base/Part.hpp>
 
+// basic c++
+#include <cmath>
+
 namespace sierra{
 namespace nalu{
 
 //==========================================================================
 // Class Definition
 //==========================================================================
-// AssembleContinuityEdgeSolverAlgorithm - add LHS/RHS for continuity
+// CorrectMdotEdgeAlgorithm - compute mdot at edges ip
 //==========================================================================
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
-AssembleContinuityEdgeSolverAlgorithm::AssembleContinuityEdgeSolverAlgorithm(
+CorrectMdotEdgeAlgorithm::CorrectMdotEdgeAlgorithm(
   Realm &realm,
-  stk::mesh::Part *part,
-  EquationSystem *eqSystem)
-  : SolverAlgorithm(realm, part, eqSystem),
+  stk::mesh::Part *part)
+  : Algorithm(realm, part),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
     uDiagInv_(NULL),    
@@ -45,37 +45,29 @@ AssembleContinuityEdgeSolverAlgorithm::AssembleContinuityEdgeSolverAlgorithm(
     coordinates_(NULL),
     pressure_(NULL),
     density_(NULL),
-    edgeAreaVec_(NULL)
+    edgeAreaVec_(NULL),
+    massFlowRate_(NULL)
 {
-  // save off fields
+  // save off field
   stk::mesh::MetaData & meta_data = realm_.meta_data();
   if ( meshMotion_ )
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
   else
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
-  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv");  
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv");   
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
   density_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   edgeAreaVec_ = meta_data.get_field<VectorFieldType>(stk::topology::EDGE_RANK, "edge_area_vector");
-  massFlowRate_ = meta_data.get_field<ScalarFieldType>(stk::topology::EDGE_RANK, "mass_flow_rate");  
-}
-
-//--------------------------------------------------------------------------
-//-------- initialize_connectivity -----------------------------------------
-//--------------------------------------------------------------------------
-void
-AssembleContinuityEdgeSolverAlgorithm::initialize_connectivity()
-{
-  eqSystem_->linsys_->buildEdgeToNodeGraph(partVec_);
+  massFlowRate_ = meta_data.get_field<ScalarFieldType>(stk::topology::EDGE_RANK, "mass_flow_rate");
 }
 
 //--------------------------------------------------------------------------
 //-------- execute ---------------------------------------------------------
 //--------------------------------------------------------------------------
 void
-AssembleContinuityEdgeSolverAlgorithm::execute()
+CorrectMdotEdgeAlgorithm::execute()
 {
 
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -95,20 +87,11 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
   // deal with interpolation procedure
   const double interpTogether = realm_.get_mdot_interp();
   const double om_interpTogether = 1.0-interpTogether;
-  
-  // space for LHS/RHS; always nodesPerEdge*nodesPerEdge and nodesPerEdge
-  std::vector<double> lhs(4);
-  std::vector<double> rhs(2);
-  std::vector<int> scratchIds(2);
-  std::vector<double> scratchVals(2);
-  std::vector<stk::mesh::Entity> connected_nodes(2);
 
   // area vector; gather into
   std::vector<double> areaVec(nDim);
 
   // pointers for fast access
-  double *p_lhs = &lhs[0];
-  double *p_rhs = &rhs[0];
   double *p_areaVec = &areaVec[0];
 
   // deal with state
@@ -116,7 +99,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
 
   // define some common selectors
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
-    & stk::mesh::selectUnion(partVec_) 
+    & stk::mesh::selectUnion(partVec_)  
     & !(realm_.get_inactive_selector());
 
   stk::mesh::BucketVector const& edge_buckets =
@@ -126,16 +109,16 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
     stk::mesh::Bucket & b = **ib ;
     const stk::mesh::Bucket::size_type length   = b.size();
 
-    // pointer to edge area vector
-    double * mdot     = stk::mesh::field_data(*massFlowRate_, b);
+    // pointer to edge area vector and mdot
     const double * av = stk::mesh::field_data(*edgeAreaVec_, b);
+    double * mdot     = stk::mesh::field_data(*massFlowRate_, b);
 
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
+      stk::mesh::Entity const * edge_node_rels = b.begin_nodes(k);
+
       // sanity check on number or nodes
       ThrowAssert( b.num_nodes(k) == 2 );
-
-      stk::mesh::Entity const * edge_node_rels = b.begin_nodes(k);
 
       // pointer to edge area vector
       for ( int j = 0; j < nDim; ++j )
@@ -145,27 +128,24 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       stk::mesh::Entity nodeL = edge_node_rels[0];
       stk::mesh::Entity nodeR = edge_node_rels[1];
 
-      connected_nodes[0] = nodeL;
-      connected_nodes[1] = nodeR;
-
       // extract nodal fields
-      const double * coordL = stk::mesh::field_data(*coordinates_, nodeL);
-      const double * coordR = stk::mesh::field_data(*coordinates_, nodeR);
+      const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
+      const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
 
       const double * uDiagInvL = stk::mesh::field_data(*uDiagInv_, nodeL);
       const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
+      
+      const double * GpdxL = stk::mesh::field_data(*Gpdx_, nodeL );
+      const double * GpdxR = stk::mesh::field_data(*Gpdx_, nodeR );
 
-      const double * GpdxL = stk::mesh::field_data(*Gpdx_, nodeL);
-      const double * GpdxR = stk::mesh::field_data(*Gpdx_, nodeR);
+      const double * vrtmL = stk::mesh::field_data(*velocityRTM_, nodeL );
+      const double * vrtmR = stk::mesh::field_data(*velocityRTM_, nodeR );
 
-      const double * vrtmL = stk::mesh::field_data(*velocityRTM_, nodeL);
-      const double * vrtmR = stk::mesh::field_data(*velocityRTM_, nodeR);
+      const double pressureL = *stk::mesh::field_data(*pressure_, nodeL );
+      const double pressureR = *stk::mesh::field_data(*pressure_, nodeR );
 
-      const double pressureL = *stk::mesh::field_data(*pressure_, nodeL);
-      const double pressureR = *stk::mesh::field_data(*pressure_, nodeR);
-
-      const double densityL = *stk::mesh::field_data(densityNp1, nodeL);
-      const double densityR = *stk::mesh::field_data(densityNp1, nodeR);
+      const double densityL = *stk::mesh::field_data(densityNp1, nodeL );
+      const double densityR = *stk::mesh::field_data(densityNp1, nodeR );
 
       // compute geometry
       double axdx = 0.0;
@@ -193,7 +173,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       }
       
       //  mdot
-      double tmdot = 0.0; 
+      double tmdot = uDiagInvFDotN*(pressureR - pressureL)*asq*inv_axdx;
       for ( int j = 0; j < nDim; ++j ) {
         const double axj = p_areaVec[j];
         const double dxj = coordR[j] - coordL[j];
@@ -201,32 +181,24 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
         const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
         const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
         const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
-        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);        
-        tmdot += mdot[k] - (uDiagInvFDotN*kxj*GjIp*nocFac
-                            - uDiagInvFParallel[j]*GjIp)*axj;
+        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
+        tmdot = (uDiagInvFDotN*kxj*GjIp*nocFac + uDiagInvFParallel[j]*GjIp)*axj;
       }
-
-      const double lhsfac = -asq*inv_axdx*uDiagInvFDotN;
-
-      /*
-        lhs[0] = IL,IL; lhs[1] = IL,IR; IR,IL; IR,IR
-      */
-
-      // first left
-      p_lhs[0] = -lhsfac;
-      p_lhs[1] = +lhsfac;
-      p_rhs[0] = -tmdot;
-
-      // now right
-      p_lhs[2] = +lhsfac;
-      p_lhs[3] = -lhsfac;
-      p_rhs[1] = tmdot;
-
-      apply_coeff(connected_nodes, scratchIds, scratchVals, rhs, lhs, __FILE__);
-
+      // scatter to mdot
+      mdot[k] -= tmdot;
     }
   }
 }
+
+//--------------------------------------------------------------------------
+//-------- destructor ------------------------------------------------------
+//--------------------------------------------------------------------------
+CorrectMdotEdgeAlgorithm::~CorrectMdotEdgeAlgorithm()
+{
+  // does nothing
+}
+
+
 
 } // namespace nalu
 } // namespace Sierra

@@ -6,8 +6,8 @@
 /*------------------------------------------------------------------------*/
 
 
-#ifndef ComputeMdotEdgeOpenAlgorithm_h
-#define ComputeMdotEdgeOpenAlgorithm_h
+#ifndef CorrectMdotEdgeAlgorithm_h
+#define CorrectMdotEdgeAlgorithm_h
 
 #include<Algorithm.h>
 #include<FieldTypeDef.h>
@@ -20,28 +20,27 @@ namespace nalu{
 
 class Realm;
 
-class ComputeMdotEdgeOpenAlgorithm : public Algorithm
+class CorrectMdotEdgeAlgorithm : public Algorithm
 {
 public:
 
-  ComputeMdotEdgeOpenAlgorithm(
+  CorrectMdotEdgeAlgorithm(
     Realm &realm,
     stk::mesh::Part *part);
-  ~ComputeMdotEdgeOpenAlgorithm();
+  ~CorrectMdotEdgeAlgorithm();
 
   void execute();
-
+  
   const bool meshMotion_;
-
   VectorFieldType *velocityRTM_;
-  VectorFieldType *uDiagInv_;  
+  VectorFieldType *uDiagInv_;
   VectorFieldType *Gpdx_;
   VectorFieldType *coordinates_;
   ScalarFieldType *pressure_;
   ScalarFieldType *density_;
-  GenericFieldType *exposedAreaVec_;
-  GenericFieldType *openMassFlowRate_;
-  ScalarFieldType *pressureBc_;
+  VectorFieldType *edgeAreaVec_;
+  ScalarFieldType *massFlowRate_;
+
 };
 
 } // namespace nalu

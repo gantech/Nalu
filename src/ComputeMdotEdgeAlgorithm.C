@@ -40,6 +40,7 @@ ComputeMdotEdgeAlgorithm::ComputeMdotEdgeAlgorithm(
   : Algorithm(realm, part),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
+    uDiagInv_(NULL),    
     Gpdx_(NULL),
     coordinates_(NULL),
     pressure_(NULL),
@@ -53,6 +54,7 @@ ComputeMdotEdgeAlgorithm::ComputeMdotEdgeAlgorithm(
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
   else
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv");   
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
@@ -130,42 +132,29 @@ ComputeMdotEdgeAlgorithm::execute()
       const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
       const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
 
+      const double * uDiagInvL = stk::mesh::field_data(*uDiagInv_, nodeL);
+      const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
+      
       const double * GpdxL = stk::mesh::field_data(*Gpdx_, nodeL );
       const double * GpdxR = stk::mesh::field_data(*Gpdx_, nodeR );
 
       const double * vrtmL = stk::mesh::field_data(*velocityRTM_, nodeL );
       const double * vrtmR = stk::mesh::field_data(*velocityRTM_, nodeR );
 
-      const double pressureL = *stk::mesh::field_data(*pressure_, nodeL );
-      const double pressureR = *stk::mesh::field_data(*pressure_, nodeR );
-
       const double densityL = *stk::mesh::field_data(densityNp1, nodeL );
       const double densityR = *stk::mesh::field_data(densityNp1, nodeR );
 
-      // compute geometry
-      double axdx = 0.0;
-      double asq = 0.0;
-      for ( int j = 0; j < nDim; ++j ) {
-        const double axj = p_areaVec[j];
-        const double dxj = coordR[j] - coordL[j];
-        asq += axj*axj;
-        axdx += axj*dxj;
-      }
-
-      const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
       //  mdot
-      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
+      double tmdot = 0.0;
       for ( int j = 0; j < nDim; ++j ) {
         const double axj = p_areaVec[j];
         const double dxj = coordR[j] - coordL[j];
-        const double kxj = axj - asq*inv_axdx*dxj; // NOC
         const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
         const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
-        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
-        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + projTimeScale*GjIp)*axj 
-          - projTimeScale*kxj*GjIp*nocFac;
+        const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
+        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + projTimeScale*uDiagInvGjIp)*axj ;
       }
       // scatter to mdot
       mdot[k] = tmdot;

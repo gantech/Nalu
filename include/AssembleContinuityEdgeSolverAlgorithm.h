@@ -38,11 +38,13 @@ public:
   const bool meshMotion_;
   
   VectorFieldType *velocityRTM_;
+  VectorFieldType *uDiagInv_;
   VectorFieldType *Gpdx_;
   VectorFieldType *coordinates_;
   ScalarFieldType *pressure_;
   ScalarFieldType *density_;
   VectorFieldType *edgeAreaVec_;
+  ScalarFieldType *massFlowRate_;  
 };
 
 } // namespace nalu

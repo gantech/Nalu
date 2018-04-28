@@ -38,6 +38,7 @@ public:
   const bool meshMotion_;
 
   VectorFieldType *velocityRTM_;
+  VectorFieldType *uDiagInv_;
   VectorFieldType *Gpdx_;
   VectorFieldType *coordinates_;
   ScalarFieldType *pressure_;

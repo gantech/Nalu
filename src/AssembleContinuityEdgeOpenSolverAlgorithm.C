@@ -41,6 +41,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
   : SolverAlgorithm(realm, part, eqSystem),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
+    uDiagInv_(NULL),   
     Gpdx_(NULL),
     coordinates_(NULL),
     pressure_(NULL),
@@ -54,6 +55,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
      velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
    else
      velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv"); 
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
@@ -118,6 +120,16 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
   // define some common selectors
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
     &stk::mesh::selectUnion(partVec_);
+
+  std::vector<stk::mesh::Entity> refNodeList(1);
+  stk::mesh::BucketVector const& node_buckets =
+      realm_.get_buckets( stk::topology::NODE_RANK, stk::mesh::selectUnion(partVec_));
+  for (auto b: node_buckets) {
+      for (int in=0; in < b->size(); in++) {
+          refNodeList[0] = (*b)[in];
+          eqSystem_->linsys_->resetRows(refNodeList, 0, 1);
+      }
+  }
 
   stk::mesh::BucketVector const& face_buckets =
     realm_.get_buckets( meta_data.side_rank(), s_locally_owned_union);
@@ -198,6 +210,8 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
         const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
 
+        const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
+
         const double pressureL = *stk::mesh::field_data(*pressure_, nodeL );
         const double pressureR = *stk::mesh::field_data(*pressure_, nodeR );
         const double pressureIp = 0.5*(pressureL + pressureR);
@@ -216,34 +230,30 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         double asq = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
           const double axj = areaVec[faceOffSet+j];
-          const double coordIp = 0.5*(coordR[j] + coordL[j]);
+          const double coordIp = coordR[j] + coordL[j];
           const double dxj = coordR[j]  - coordIp;
           asq += axj*axj;
           axdx += axj*dxj;
         }
+        double magA = sqrt(asq);
 
         const double inv_axdx = 1.0/axdx;
         const double rhoBip = densityR;
 
-        //  mdot
-        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac - mdotCorrection;
+        std::vector<double> uDiagInvFParallel(3,0.0);
+        double uDiagInvFDotN = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
-          const double axj = areaVec[faceOffSet+j];
-          const double coordIp = 0.5*(coordR[j] + coordL[j]);
-          const double dxj = coordR[j]  - coordIp;
-          const double kxj = axj - asq*inv_axdx*dxj;
-          const double Gjp = GpdxR[j];
-          tmdot += (rhoBip*vrtmR[j]+projTimeScale*Gjp*pstabFac)*axj
-            - projTimeScale*kxj*Gjp*nocFac*pstabFac;
+            const double axj = areaVec[faceOffSet+j];
+            uDiagInvFDotN = uDiagInvR[j]*axj ;
         }
-
-        // rhs
-        p_rhs[nearestNode] -= tmdot/projTimeScale;
-
+        uDiagInvFDotN /= magA ;
+        
         // lhs right; IR, IL; IR, IR
-        double lhsfac = asq*inv_axdx*pstabFac;
+        double lhsfac = asq*inv_axdx*pstabFac*uDiagInvFDotN;
+
+        // Zero gradient 
         p_lhs[rowR+nearestNode] += 0.5*lhsfac;
-        p_lhs[rowR+opposingNode] += 0.5*lhsfac;
+        p_lhs[rowR+opposingNode] -= 0.5*lhsfac;
       }
 
       apply_coeff(connected_nodes, scratchIds, scratchVals, rhs, lhs, __FILE__);

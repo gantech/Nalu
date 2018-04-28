@@ -88,6 +88,13 @@ public:
     numSumIntoCalls_++;
   }
 
+  virtual void getDiagonalAsField(
+    stk::mesh::FieldBase * diagField,
+    const stk::mesh::PartVector & parts,
+    const unsigned beginPos,
+    const unsigned endPos)
+  {}
+  
   virtual void applyDirichletBCs(
     stk::mesh::FieldBase * solutionField,
     stk::mesh::FieldBase * bcValuesField,

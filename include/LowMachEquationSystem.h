@@ -27,6 +27,7 @@ class AssembleNodalGradUAlgorithmDriver;
 class MomentumEquationSystem;
 class ContinuityEquationSystem;
 class ComputeMdotAlgorithmDriver;
+class CorrectMdotAlgorithmDriver;
 class LinearSystem;
 class ProjectedNodalGradientEquationSystem;
 class SurfaceForceAndMomentAlgorithmDriver;
@@ -82,6 +83,8 @@ public:
 
   virtual void predict_state();
 
+  void store_pressure_gradient();
+  
   void project_nodal_velocity();
 
   void post_converged_work();
@@ -171,6 +174,7 @@ public:
 
   VectorFieldType *coordinates_;
   VectorFieldType *uTmp_;
+  VectorFieldType *uDiagInv_;
 
   ScalarFieldType *visc_;
   ScalarFieldType *tvisc_;
@@ -261,6 +265,7 @@ public:
 
   AssembleNodalGradAlgorithmDriver *assembleNodalGradAlgDriver_;
   ComputeMdotAlgorithmDriver *computeMdotAlgDriver_;
+  CorrectMdotAlgorithmDriver *correctMdotAlgDriver_;  
   ProjectedNodalGradientEquationSystem *projectedNodalGradEqs_;
 };
 

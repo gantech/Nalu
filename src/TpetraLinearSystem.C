@@ -1140,6 +1140,63 @@ TpetraLinearSystem::sumInto(
 }
 
 void
+TpetraLinearSystem::getDiagonalInvAsField(
+  stk::mesh::FieldBase * diagInvField,
+  const stk::mesh::PartVector & parts,
+  const unsigned beginPos,
+  const unsigned endPos)
+{
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  double gdaf_time = -NaluEnv::self().nalu_time();
+
+  const stk::mesh::Selector selector 
+    = (metaData.locally_owned_part() | metaData.globally_shared_part())
+    & stk::mesh::selectUnion(parts)
+    & stk::mesh::selectField(*diagInvField) 
+    & !(realm_.get_inactive_selector());
+
+  stk::mesh::BucketVector const& buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, selector );
+
+  for(const stk::mesh::Bucket* bptr : buckets) {
+    const stk::mesh::Bucket & b = *bptr;
+
+    const unsigned fieldSize = field_bytes_per_entity(*diagInvField, b) / sizeof(double);
+    ThrowRequire(fieldSize == numDof_);
+
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * diagInv = (double*)stk::mesh::field_data(*diagInvField, *b.begin());
+
+    Teuchos::ArrayView<const LocalOrdinal> indices;
+    Teuchos::ArrayView<const double> values;
+
+    for (stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      const stk::mesh::Entity entity = b[k];
+      const stk::mesh::EntityId naluId = *stk::mesh::field_data(*realm_.naluGlobalId_, entity);
+      const LocalOrdinal localIdOffset = lookup_myLID(myLIDs_, naluId, "applyDirichletBCs") * numDof_;
+
+      for(unsigned d=beginPos; d < endPos; ++d) {
+        const LocalOrdinal localId = localIdOffset + d;
+        const bool useOwned = localId < maxOwnedRowId_;
+        const LocalOrdinal actualLocalId = useOwned ? localId : localId - maxOwnedRowId_;
+        Teuchos::RCP<LinSys::Matrix> matrix = useOwned ? ownedMatrix_ : globallyOwnedMatrix_;
+
+        if(localId > maxGloballyOwnedRowId_) {
+          std::cerr << "localId > maxGloballyOwnedRowId_:: localId= " << localId << " maxGloballyOwnedRowId_= " << maxGloballyOwnedRowId_ << " useOwned = " << (localId < maxOwnedRowId_ ) << std::endl;
+          throw std::runtime_error("logic error: localId > maxGloballyOwnedRowId_");
+        }
+
+        // Get the LHS
+        matrix->getLocalRowView(actualLocalId, indices, values);
+        diagInv[k*fieldSize + d] = 1.0/values[localId];
+      }
+    }
+  }
+  gdaf_time += NaluEnv::self().nalu_time();
+}
+
+void
 TpetraLinearSystem::applyDirichletBCs(
   stk::mesh::FieldBase * solutionField,
   stk::mesh::FieldBase * bcValuesField,
