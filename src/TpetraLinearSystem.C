@@ -1189,7 +1189,11 @@ TpetraLinearSystem::getDiagonalInvAsField(
 
         // Get the LHS
         matrix->getLocalRowView(actualLocalId, indices, values);
-        diagInv[k*fieldSize + d] = 1.0/values[localId];
+        const size_t rowLength = values.size();
+        for(size_t i=0; i < rowLength; ++i) {
+            if (indices[i] == localId)
+                diagInv[k*fieldSize + d] = 1.0/values[i];
+        }
       }
     }
   }

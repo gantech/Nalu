@@ -662,7 +662,7 @@ LowMachEquationSystem::solve_and_update()
 
     const AlgorithmType algType = INTERIOR;
     std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
-        = solverAlgDriver_->solverAlgMap_.find(algType);
+        = momentumEqSys_->solverAlgDriver_->solverAlgMap_.find(algType);
     momentumEqSys_->linsys_->getDiagonalInvAsField(momentumEqSys_->uDiagInv_, itsi->second->partVec_, 0, nDim);
     
     // update all of velocity
