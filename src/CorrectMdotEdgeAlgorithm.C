@@ -174,16 +174,16 @@ CorrectMdotEdgeAlgorithm::execute()
       
       //  mdot
       double tmdot = uDiagInvFDotN*(pressureR - pressureL)*asq*inv_axdx;
-      for ( int j = 0; j < nDim; ++j ) {
-        const double axj = p_areaVec[j];
-        const double dxj = coordR[j] - coordL[j];
-        const double kxj = axj - asq*inv_axdx*dxj; // NOC
-        const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
-        const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
-        const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
-        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
-        tmdot = (uDiagInvFDotN*kxj*GjIp*nocFac + uDiagInvFParallel[j]*GjIp)*axj;
-      }
+      // for ( int j = 0; j < nDim; ++j ) {
+      //   const double axj = p_areaVec[j];
+      //   const double dxj = coordR[j] - coordL[j];
+      //   const double kxj = axj - asq*inv_axdx*dxj; // NOC
+      //   const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
+      //   const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
+      //   const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
+      //   const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
+      //   tmdot = (uDiagInvFDotN*kxj*GjIp + uDiagInvFParallel[j]*GjIp*axj)*nocFac;
+      // }
       // scatter to mdot
       mdot[k] -= tmdot;
     }

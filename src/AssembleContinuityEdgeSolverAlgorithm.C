@@ -202,8 +202,8 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
         const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
         const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
         const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);        
-        tmdot += mdot[k] - (uDiagInvFDotN*kxj*GjIp*nocFac
-                            - uDiagInvFParallel[j]*GjIp)*axj;
+        tmdot += mdot[k] ; //- uDiagInvFDotN*kxj*GjIp*nocFac
+        //- uDiagInvFParallel[j]*GjIp*axj*nocFac;
       }
 
       const double lhsfac = -asq*inv_axdx*uDiagInvFDotN;
