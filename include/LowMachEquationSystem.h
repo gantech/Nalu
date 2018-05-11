@@ -188,6 +188,9 @@ public:
 
   // saved of mesh parts that are not to be projected
   std::vector<stk::mesh::Part *> notProjectedPart_;
+
+  // saved of mesh parts that are not to be projected in the 'w' direction
+  std::vector<stk::mesh::Part *> notWProjectedPart_;  
 };
 
 class ContinuityEquationSystem : public EquationSystem {

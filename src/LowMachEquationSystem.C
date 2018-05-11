@@ -91,6 +91,7 @@
 #include <Simulation.h>
 #include <SolutionOptions.h>
 #include <SolverAlgorithmDriver.h>
+#include <TurbViscWallAlgorithm.h>
 #include <TurbViscKsgsAlgorithm.h>
 #include <TurbViscSmagorinskyAlgorithm.h>
 #include <TurbViscSSTAlgorithm.h>
@@ -852,6 +853,40 @@ LowMachEquationSystem::project_nodal_velocity()
       }
     }
   }
+
+  {
+  // selector and node_buckets (only projected nodes)
+  stk::mesh::Selector notw_projected_nodes
+      = (stk::mesh::selectUnion(momentumEqSys_->notWProjectedPart_)) &
+      stk::mesh::selectField(*dpdx);
+  stk::mesh::BucketVector const& p_node_buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, notw_projected_nodes );
+  
+  // process loop
+  for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
+        ib != p_node_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * uNp1 = stk::mesh::field_data(velocityNp1, b);
+    double * ut = stk::mesh::field_data(*uTmp, b);
+    double * dp = stk::mesh::field_data(*dpdx, b);
+    double * rho = stk::mesh::field_data(densityNp1, b);
+    
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      
+      // Get scaling factor
+      const double fac = projTimeScale/rho[k];
+      
+      // projection step
+      const size_t offSet = k*nDim;
+      for ( int j = 0; j < 2; ++j ) {
+        const double gdpx = dp[offSet+j] - ut[offSet+j];
+        uNp1[offSet+j] -= fac*gdpx;
+      }
+    }
+  }
+  }
+  
 }
 
 void
@@ -1643,8 +1678,10 @@ MomentumEquationSystem::register_wall_bc(
   const bool anyWallFunctionActivated = wallFunctionApproach || ablWallFunctionApproach;
 
   // push mesh part
-  if ( !anyWallFunctionActivated )
-    notProjectedPart_.push_back(part);
+  if ( !anyWallFunctionActivated ) {
+      notWProjectedPart_.push_back(part);
+      notProjectedPart_.push_back(part);      
+  }
 
   // algorithm type
   const AlgorithmType algType = WALL;
@@ -1714,17 +1751,17 @@ MomentumEquationSystem::register_wall_bc(
   }
   
   // copy velocity_bc to velocity np1
-  CopyFieldAlgorithm *theCopyAlg
-    = new CopyFieldAlgorithm(realm_, part,
-			     theBcField, &velocityNp1,
-			     0, nDim,
-			     stk::topology::NODE_RANK);
+  // CopyFieldAlgorithm *theCopyAlg
+  //   = new CopyFieldAlgorithm(realm_, part,
+  //       		     theBcField, &velocityNp1,
+  //       		     0, nDim,
+  //       		     stk::topology::NODE_RANK);
 
   // wall function activity will only set dof velocity np1 wall value as an IC
-  if ( anyWallFunctionActivated )
-    realm_.initCondAlg_.push_back(theCopyAlg);
-  else
-    bcDataMapAlg_.push_back(theCopyAlg);
+  // if ( anyWallFunctionActivated )
+  //   realm_.initCondAlg_.push_back(theCopyAlg);
+  // else
+  //   bcDataMapAlg_.push_back(theCopyAlg);
     
   // non-solver; contribution to Gjui; allow for element-based shifted
   if ( !managePNG_ ) {
@@ -1732,7 +1769,7 @@ MomentumEquationSystem::register_wall_bc(
       = assembleNodalGradAlgDriver_->algMap_.find(algType);
     if ( it == assembleNodalGradAlgDriver_->algMap_.end() ) {
       Algorithm *theAlg
-        = new AssembleNodalGradUBoundaryAlgorithm(realm_, part, theBcField, &dudxNone, edgeNodalGradient_);
+        = new AssembleNodalGradUBoundaryAlgorithm(realm_, part, &velocityNp1, &dudxNone, edgeNodalGradient_);
       assembleNodalGradAlgDriver_->algMap_[algType] = theAlg;
     }
     else {
@@ -1808,6 +1845,35 @@ MomentumEquationSystem::register_wall_bc(
       }
       else {
         it_utau->second->partVec_.push_back(part);
+      }
+
+      ScalarFieldType *tviscBcField = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "tvisc_wall"));
+      stk::mesh::put_field(*tviscBcField, *part);
+
+      std::map<AlgorithmType, Algorithm *>::iterator it_tv =
+          tviscAlgDriver_->algMap_.find(wfAlgType);
+      if ( it_tv == tviscAlgDriver_->algMap_.end() ) {
+          Algorithm * theAlg = NULL;
+          switch (realm_.solutionOptions_->turbulenceModel_ ) {
+          case KSGS:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case SMAGORINSKY:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case WALE:
+              theAlg = new TurbViscWallAlgorithm(realm_, part, realm_.realmUsesEdges_, grav, z0, referenceTemperature);
+              break;
+          case SST: case SST_DES:
+              throw std::runtime_error("non-supported turb model");
+              break;
+          default:
+              throw std::runtime_error("non-supported turb model");
+          }
+          tviscAlgDriver_->algMap_[algType] = theAlg;
+      }
+      else {
+          it_tv->second->partVec_.push_back(part);
       }
 
       // create lhs/rhs algorithm; generalized for edge (nearest node usage) and element
@@ -1917,6 +1983,11 @@ MomentumEquationSystem::register_symmetry_bc(
   const SymmetryBoundaryConditionData &/*symmetryBCData*/)
 {
 
+
+  // push mesh part
+  notProjectedPart_.push_back(part);
+  notWProjectedPart_.push_back(part);
+    
   // algorithm type
   const AlgorithmType algType = SYMMETRY;
 

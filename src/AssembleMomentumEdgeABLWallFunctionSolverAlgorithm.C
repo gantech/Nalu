@@ -275,6 +275,35 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
       
     }
   }
+
+  NaluEnv::self().naluOutput() << "Shutting out w at wall" << std::endl;
+  
+  std::vector<stk::mesh::Entity> refNodeList(1);
+  stk::mesh::BucketVector const& node_buckets =
+      realm_.get_buckets( stk::topology::NODE_RANK, meta_data.locally_owned_part() & stk::mesh::selectUnion(partVec_));
+  for (auto b: node_buckets) {
+      for (int in=0; in < b->size(); in++) {
+          refNodeList[0] = (*b)[in];
+          eqSystem_->linsys_->resetRows(refNodeList, 2, 3);
+          const double * velN = stk::mesh::field_data(velocityNp1, refNodeList[0]);
+          
+          std::vector<double> lhs(9);
+          std::vector<double> rhs(3);
+          std::vector<int> scratchIds(3);
+          std::vector<double> scratchVals(3);
+
+          for (int j=0; j<9; j++) {
+              lhs[j] = 0.0;
+          }
+          rhs[0] = 0.0;
+          rhs[1] = 0.0;
+          lhs[8] = 1.0;
+          rhs[2] = -velN[2];
+          
+          apply_coeff(refNodeList, scratchIds, scratchVals, rhs, lhs, __FILE__);
+      }
+  }
+  
 }
 
 
