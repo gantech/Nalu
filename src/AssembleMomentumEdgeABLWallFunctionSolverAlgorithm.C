@@ -276,7 +276,7 @@ AssembleMomentumEdgeABLWallFunctionSolverAlgorithm::execute()
     }
   }
 
-  NaluEnv::self().naluOutput() << "Shutting out w at wall" << std::endl;
+//  NaluEnv::self().naluOutput() << "Shutting out w at wall" << std::endl;
   
   std::vector<stk::mesh::Entity> refNodeList(1);
   stk::mesh::BucketVector const& node_buckets =
