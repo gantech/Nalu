@@ -46,6 +46,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
     pressure_(NULL),
     density_(NULL),
     exposedAreaVec_(NULL),
+    openMassFlowRate_(NULL),
     pressureBc_(NULL)
 {
   // save off fields
@@ -59,6 +60,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
   density_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   exposedAreaVec_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "exposed_area_vector");
+  openMassFlowRate_ = meta_data.get_field<GenericFieldType>(meta_data.side_rank(), "open_mass_flow_rate");  
   pressureBc_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, realm_.solutionOptions_->activateOpenMdotCorrection_ ? "pressure" : "pressure_bc");
 }
 
@@ -161,6 +163,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
 
       // pointer to face data
       const double * areaVec = stk::mesh::field_data(*exposedAreaVec_, b, k);
+      double * mdot = stk::mesh::field_data(*openMassFlowRate_, b, k);
 
       // extract the connected element to this exposed face; should be single in size!
       stk::mesh::Entity const * face_elem_rels = b.begin_elements(k);
@@ -226,17 +229,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         const double rhoBip = densityR;
 
         //  mdot
-        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac - mdotCorrection;
-        for ( int j = 0; j < nDim; ++j ) {
-          const double axj = areaVec[faceOffSet+j];
-          const double coordIp = 0.5*(coordR[j] + coordL[j]);
-          const double dxj = coordR[j]  - coordIp;
-          const double kxj = axj - asq*inv_axdx*dxj;
-          const double Gjp = GpdxR[j];
-          tmdot += (rhoBip*vrtmR[j]+projTimeScale*Gjp*pstabFac)*axj
-            - projTimeScale*kxj*Gjp*nocFac*pstabFac;
-        }
-
+        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac + mdot[k];
         // rhs
         p_rhs[nearestNode] -= tmdot/projTimeScale;
 

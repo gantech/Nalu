@@ -43,6 +43,7 @@ public:
   ScalarFieldType *pressure_;
   ScalarFieldType *density_;
   VectorFieldType *edgeAreaVec_;
+  ScalarFieldType *massFlowRate_;  
 };
 
 } // namespace nalu

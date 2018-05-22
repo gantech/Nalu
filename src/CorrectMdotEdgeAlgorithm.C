@@ -7,7 +7,7 @@
 
 
 // nalu
-#include <ComputeMdotEdgeAlgorithm.h>
+#include <CorrectMdotEdgeAlgorithm.h>
 
 #include <FieldTypeDef.h>
 #include <Realm.h>
@@ -29,12 +29,12 @@ namespace nalu{
 //==========================================================================
 // Class Definition
 //==========================================================================
-// ComputeMdotEdgeAlgorithm - compute mdot at edges ip
+// CorrectMdotEdgeAlgorithm - compute mdot at edges ip
 //==========================================================================
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
-ComputeMdotEdgeAlgorithm::ComputeMdotEdgeAlgorithm(
+CorrectMdotEdgeAlgorithm::CorrectMdotEdgeAlgorithm(
   Realm &realm,
   stk::mesh::Part *part)
   : Algorithm(realm, part),
@@ -65,7 +65,7 @@ ComputeMdotEdgeAlgorithm::ComputeMdotEdgeAlgorithm(
 //-------- execute ---------------------------------------------------------
 //--------------------------------------------------------------------------
 void
-ComputeMdotEdgeAlgorithm::execute()
+CorrectMdotEdgeAlgorithm::execute()
 {
 
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -129,7 +129,7 @@ ComputeMdotEdgeAlgorithm::execute()
       // extract nodal fields
       const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
       const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
-
+      
       const double * GpdxL = stk::mesh::field_data(*Gpdx_, nodeL );
       const double * GpdxR = stk::mesh::field_data(*Gpdx_, nodeR );
 
@@ -151,24 +151,13 @@ ComputeMdotEdgeAlgorithm::execute()
         asq += axj*axj;
         axdx += axj*dxj;
       }
-
+      double magA = sqrt(asq);
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
       //  mdot
-      double tmdot = 0.0;
-      for ( int j = 0; j < nDim; ++j ) {
-        const double axj = p_areaVec[j];
-        const double dxj = coordR[j] - coordL[j];
-        const double kxj = axj - asq*inv_axdx*dxj; // NOC
-        const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
-        const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
-        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
-        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + projTimeScale*GjIp)*axj 
-          - projTimeScale*kxj*GjIp*nocFac;
-      }
-      // scatter to mdot
-      mdot[k] = tmdot;
+      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
+      mdot[k] += tmdot;
     }
   }
 }
@@ -176,7 +165,7 @@ ComputeMdotEdgeAlgorithm::execute()
 //--------------------------------------------------------------------------
 //-------- destructor ------------------------------------------------------
 //--------------------------------------------------------------------------
-ComputeMdotEdgeAlgorithm::~ComputeMdotEdgeAlgorithm()
+CorrectMdotEdgeAlgorithm::~CorrectMdotEdgeAlgorithm()
 {
   // does nothing
 }

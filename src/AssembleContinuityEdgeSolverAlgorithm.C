@@ -44,7 +44,8 @@ AssembleContinuityEdgeSolverAlgorithm::AssembleContinuityEdgeSolverAlgorithm(
     coordinates_(NULL),
     pressure_(NULL),
     density_(NULL),
-    edgeAreaVec_(NULL)
+    edgeAreaVec_(NULL),
+    massFlowRate_(NULL)
 {
   // save off fields
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -57,6 +58,7 @@ AssembleContinuityEdgeSolverAlgorithm::AssembleContinuityEdgeSolverAlgorithm(
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
   density_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
   edgeAreaVec_ = meta_data.get_field<VectorFieldType>(stk::topology::EDGE_RANK, "edge_area_vector");
+  massFlowRate_ = meta_data.get_field<ScalarFieldType>(stk::topology::EDGE_RANK, "mass_flow_rate");  
 }
 
 //--------------------------------------------------------------------------
@@ -125,6 +127,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
 
     // pointer to edge area vector
     const double * av = stk::mesh::field_data(*edgeAreaVec_, b);
+    double * mdot     = stk::mesh::field_data(*massFlowRate_, b);
 
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
@@ -174,18 +177,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       const double rhoIp = 0.5*(densityR + densityL);
 
       //  mdot
-      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
-      for ( int j = 0; j < nDim; ++j ) {
-        const double axj = p_areaVec[j];
-        const double dxj = coordR[j] - coordL[j];
-        const double kxj = axj - asq*inv_axdx*dxj; // NOC
-        const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
-        const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
-        const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
-        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + projTimeScale*GjIp)*axj 
-          - projTimeScale*kxj*GjIp*nocFac;
-      }
-
+      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx + mdot[k];
       const double lhsfac = -asq*inv_axdx;
 
       /*

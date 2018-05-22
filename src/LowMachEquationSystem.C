@@ -46,6 +46,9 @@
 #include <ComputeMdotEdgeOpenAlgorithm.h>
 #include <ComputeMdotElemOpenAlgorithm.h>
 #include <ComputeMdotNonConformalAlgorithm.h>
+#include <CorrectMdotAlgorithmDriver.h>
+#include <CorrectMdotEdgeAlgorithm.h>
+#include <CorrectMdotEdgeOpenAlgorithm.h>
 #include <ComputeWallFrictionVelocityAlgorithm.h>
 #include <ComputeABLWallFrictionVelocityAlgorithm.h>
 #include <ConstantAuxFunction.h>
@@ -623,10 +626,13 @@ LowMachEquationSystem::solve_and_update()
 {
   // wrap timing
   double timeA, timeB;
+  const int nDim = realm_.meta_data().spatial_dimension();
+  
   if ( isInit_ ) {
     timeA = NaluEnv::self().nalu_time();
     continuityEqSys_->compute_projected_nodal_gradient();
     continuityEqSys_->computeMdotAlgDriver_->execute();
+    continuityEqSys_->correctMdotAlgDriver_->execute();
 
     timeB = NaluEnv::self().nalu_time();
     continuityEqSys_->timerMisc_ += (timeB-timeA);
@@ -659,16 +665,19 @@ LowMachEquationSystem::solve_and_update()
     timeB = NaluEnv::self().nalu_time();
     momentumEqSys_->timerAssemble_ += (timeB-timeA);
 
+    // store old pressure gradient
+    timeA = NaluEnv::self().nalu_time();
+    store_pressure_gradient();
+    timeB = NaluEnv::self().nalu_time();
+    timerMisc_ += (timeB-timeA);
+    
     // compute velocity relative to mesh with new velocity
     realm_.compute_vrtm();
 
-    // activate global correction scheme
-    if ( realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
-      timeA = NaluEnv::self().nalu_time();
-      continuityEqSys_->computeMdotAlgDriver_->execute();
-      timeB = NaluEnv::self().nalu_time();
-      continuityEqSys_->timerMisc_ += (timeB-timeA);
-    }
+    timeA = NaluEnv::self().nalu_time();
+    continuityEqSys_->computeMdotAlgDriver_->execute();
+    timeB = NaluEnv::self().nalu_time();
+    continuityEqSys_->timerMisc_ += (timeB-timeA);
 
     // continuity assemble, load_complete and solve
     continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
@@ -684,9 +693,12 @@ LowMachEquationSystem::solve_and_update()
     timeB = NaluEnv::self().nalu_time();
     continuityEqSys_->timerAssemble_ += (timeB-timeA);
 
+    // compute pressure gradient
+    continuityEqSys_->compute_projected_nodal_gradient();
+
     // compute mdot
     timeA = NaluEnv::self().nalu_time();
-    continuityEqSys_->computeMdotAlgDriver_->execute();
+    continuityEqSys_->correctMdotAlgDriver_->execute();
     timeB = NaluEnv::self().nalu_time();
     continuityEqSys_->timerMisc_ += (timeB-timeA);
 
@@ -738,6 +750,9 @@ LowMachEquationSystem::post_adapt_work()
       // compute new nodal pressure gradient
       continuityEqSys_->compute_projected_nodal_gradient();
       
+      // compute mdot
+      continuityEqSys_->computeMdotAlgDriver_->execute();
+      
       continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
       
       // update pressure
@@ -748,13 +763,17 @@ LowMachEquationSystem::post_adapt_work()
           1.0, *continuityEqSys_->pressure_,
           realm_.get_activate_aura());
     }
-    
-    // compute mdot
-    continuityEqSys_->computeMdotAlgDriver_->execute();
-    
+
+    // compute new nodal pressure gradient
+    continuityEqSys_->compute_projected_nodal_gradient();
+      
+    // correct mdot
+    continuityEqSys_->correctMdotAlgDriver_->execute();
+
     // project nodal velocity/gradU
     const bool processU = false;
     if ( processU ) {
+      store_pressure_gradient();
       project_nodal_velocity();
       momentumEqSys_->assembleNodalGradAlgDriver_->execute();
     }
@@ -767,10 +786,10 @@ LowMachEquationSystem::post_adapt_work()
 }
 
 //--------------------------------------------------------------------------
-//-------- project_nodal_velocity ------------------------------------------
+//-------- store_pressure_gradient------------------------------------------
 //--------------------------------------------------------------------------
 void
-LowMachEquationSystem::project_nodal_velocity()
+LowMachEquationSystem::store_pressure_gradient()
 {
 
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -778,16 +797,12 @@ LowMachEquationSystem::project_nodal_velocity()
   // time step
   const double dt = realm_.get_time_step();
   const double gamma1 = realm_.get_gamma1();
-  const double projTimeScale = dt/gamma1;
 
   const int nDim = meta_data.spatial_dimension();
 
   // field that we need
-  VectorFieldType *velocity = momentumEqSys_->velocity_;
-  VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
   VectorFieldType *uTmp = momentumEqSys_->uTmp_;
   VectorFieldType *dpdx = continuityEqSys_->dpdx_;
-  ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
 
   //==========================================================
   // save off dpdx to uTmp (do it everywhere)
@@ -812,11 +827,30 @@ LowMachEquationSystem::project_nodal_velocity()
       }
     }
   }
+}
 
-  //==========================================================
-  // safe to update pressure gradient
-  //==========================================================
-  continuityEqSys_->compute_projected_nodal_gradient();
+//--------------------------------------------------------------------------
+//-------- project_nodal_velocity ------------------------------------------
+//--------------------------------------------------------------------------
+void
+LowMachEquationSystem::project_nodal_velocity()
+{
+
+  stk::mesh::MetaData & meta_data = realm_.meta_data();
+
+  // time step
+  const double dt = realm_.get_time_step();
+  const double gamma1 = realm_.get_gamma1();
+  const double projTimeScale = dt/gamma1;
+
+  const int nDim = meta_data.spatial_dimension();
+
+  // field that we need
+  VectorFieldType *velocity = momentumEqSys_->velocity_;
+  VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
+  VectorFieldType *uTmp = momentumEqSys_->uTmp_;
+  VectorFieldType *dpdx = continuityEqSys_->dpdx_;
+  ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
 
   //==========================================================
   // project u, u^n+1 = u^k+1 - dt/rho*(Gjp^N+1 - uTmp);
@@ -2228,6 +2262,7 @@ ContinuityEquationSystem::ContinuityEquationSystem(
     pTmp_(NULL),
     assembleNodalGradAlgDriver_(new AssembleNodalGradAlgorithmDriver(realm_, "pressure", "dpdx")),
     computeMdotAlgDriver_(new ComputeMdotAlgorithmDriver(realm_)),
+    correctMdotAlgDriver_(new CorrectMdotAlgorithmDriver(realm_)),
     projectedNodalGradEqs_(NULL)
 {
 
@@ -2264,6 +2299,7 @@ ContinuityEquationSystem::~ContinuityEquationSystem()
 {
   delete assembleNodalGradAlgDriver_;
   delete computeMdotAlgDriver_;
+  delete correctMdotAlgDriver_;  
 }
 
 //--------------------------------------------------------------------------
@@ -2365,6 +2401,16 @@ ContinuityEquationSystem::register_interior_algorithm(
     }
     else {
       itc->second->partVec_.push_back(part);
+    }
+
+    itc = correctMdotAlgDriver_->algMap_.find(algType);
+    if ( itc == correctMdotAlgDriver_->algMap_.end() ) {
+        CorrectMdotEdgeAlgorithm *theAlg
+            = new CorrectMdotEdgeAlgorithm(realm_, part);
+        correctMdotAlgDriver_->algMap_[algType] = theAlg;
+    }
+    else {
+        itc->second->partVec_.push_back(part);
     }
 
     // solver
@@ -2716,6 +2762,18 @@ ContinuityEquationSystem::register_open_bc(
     else {
       itm->second->partVec_.push_back(part);
     }
+
+    // non-solver edge alg; correct open mdot
+    itm = correctMdotAlgDriver_->algMap_.find(algType);
+    if ( itm == correctMdotAlgDriver_->algMap_.end() ) {
+        CorrectMdotEdgeOpenAlgorithm *theAlg
+            = new CorrectMdotEdgeOpenAlgorithm(realm_, part);
+        correctMdotAlgDriver_->algMap_[algType] = theAlg;
+    }
+    else {
+        itm->second->partVec_.push_back(part);
+    }
+    
 
     // solver; lhs
     std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi =

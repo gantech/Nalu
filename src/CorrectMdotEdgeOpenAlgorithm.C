@@ -7,7 +7,7 @@
 
 
 // nalu
-#include "ComputeMdotEdgeOpenAlgorithm.h"
+#include "CorrectMdotEdgeOpenAlgorithm.h"
 #include "Algorithm.h"
 
 #include "FieldTypeDef.h"
@@ -29,12 +29,12 @@ namespace nalu{
 //==========================================================================
 // Class Definition
 //==========================================================================
-// ComputeMdotEdgeOpenAlgorithm - compute mdot at edges ip
+// CorrectMdotEdgeOpenAlgorithm - compute mdot at edges ip
 //==========================================================================
 //--------------------------------------------------------------------------
 //-------- constructor -----------------------------------------------------
 //--------------------------------------------------------------------------
-ComputeMdotEdgeOpenAlgorithm::ComputeMdotEdgeOpenAlgorithm(
+CorrectMdotEdgeOpenAlgorithm::CorrectMdotEdgeOpenAlgorithm(
   Realm &realm,
   stk::mesh::Part *part)
   : Algorithm(realm, part),
@@ -66,7 +66,7 @@ ComputeMdotEdgeOpenAlgorithm::ComputeMdotEdgeOpenAlgorithm(
 //--------------------------------------------------------------------------
 //-------- destructor ------------------------------------------------------
 //--------------------------------------------------------------------------
-ComputeMdotEdgeOpenAlgorithm::~ComputeMdotEdgeOpenAlgorithm()
+CorrectMdotEdgeOpenAlgorithm::~CorrectMdotEdgeOpenAlgorithm()
 {
   // does nothing
 }
@@ -75,7 +75,7 @@ ComputeMdotEdgeOpenAlgorithm::~ComputeMdotEdgeOpenAlgorithm()
 //-------- execute ---------------------------------------------------------
 //--------------------------------------------------------------------------
 void
-ComputeMdotEdgeOpenAlgorithm::execute()
+CorrectMdotEdgeOpenAlgorithm::execute()
 {
   stk::mesh::BulkData & bulk_data = realm_.bulk_data();
   stk::mesh::MetaData & meta_data = realm_.meta_data();
@@ -95,13 +95,9 @@ ComputeMdotEdgeOpenAlgorithm::execute()
   // time step; scale projection time scale by pstabFac (no divide by here)
   const double dt = realm_.get_time_step();
   const double gamma1 = realm_.get_gamma1();
-  const double projTimeScale = dt/gamma1*pstabFac;
+  const double projTimeScale = dt/gamma1;
 
   // interpolation for mdot uses nearest node, therefore, n/a
-
-  // set accumulation variables
-  double mdotOpen = 0.0;
-  size_t mdotOpenIpCount = 0;
 
   // deal with state
   ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
@@ -129,8 +125,6 @@ ComputeMdotEdgeOpenAlgorithm::execute()
     const int num_face_nodes = b.topology().num_nodes();
     
     const stk::mesh::Bucket::size_type length   = b.size();
-
-    mdotOpenIpCount += length*num_face_nodes;
 
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
 
@@ -191,25 +185,11 @@ ComputeMdotEdgeOpenAlgorithm::execute()
         const double rhoBip = densityR;
 
         // mdot
-        double tmdot = 0.0; //-projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx;
-        for ( int j = 0; j < nDim; ++j ) {
-          const double axj = areaVec[faceOffSet+j];
-          const double coordIp = 0.5*(coordR[j] + coordL[j]);
-          const double dxj = coordR[j]  - coordIp;
-          const double kxj = axj - asq*inv_axdx*dxj;
-          const double Gjp = GpdxR[j];
-          tmdot += (rhoBip*vrtm[j]+projTimeScale*Gjp)*axj
-            - projTimeScale*kxj*Gjp*nocFac;
-        }
-        // scatter to mdot and accumulate
-        mdot[ip] = tmdot;
-        mdotOpen += tmdot;
+        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac;
+        mdot[ip] += tmdot;
       }
     }
   }
-  // scatter back to solution options; not thread safe
-  realm_.solutionOptions_->mdotAlgOpen_ += mdotOpen;
-  realm_.solutionOptions_->mdotAlgOpenIpCount_ += mdotOpenIpCount;
 }
 
 } // namespace nalu

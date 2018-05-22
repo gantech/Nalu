@@ -6,34 +6,30 @@
 /*------------------------------------------------------------------------*/
 
 
-#ifndef AssembleContinuityEdgeOpenSolverAlgorithm_h
-#define AssembleContinuityEdgeOpenSolverAlgorithm_h
+#ifndef CorrectMdotEdgeOpenAlgorithm_h
+#define CorrectMdotEdgeOpenAlgorithm_h
 
-#include<SolverAlgorithm.h>
+#include<Algorithm.h>
 #include<FieldTypeDef.h>
 
-namespace stk {
-namespace mesh {
-class Part;
-}
-}
+// stk
+#include <stk_mesh/base/Part.hpp>
 
 namespace sierra{
 namespace nalu{
 
 class Realm;
 
-class AssembleContinuityEdgeOpenSolverAlgorithm : public SolverAlgorithm
+class CorrectMdotEdgeOpenAlgorithm : public Algorithm
 {
 public:
 
-  AssembleContinuityEdgeOpenSolverAlgorithm(
+  CorrectMdotEdgeOpenAlgorithm(
     Realm &realm,
-    stk::mesh::Part *part,
-    EquationSystem *eqSystem);
-  virtual ~AssembleContinuityEdgeOpenSolverAlgorithm() {}
-  virtual void initialize_connectivity();
-  virtual void execute();
+    stk::mesh::Part *part);
+  ~CorrectMdotEdgeOpenAlgorithm();
+
+  void execute();
 
   const bool meshMotion_;
 
