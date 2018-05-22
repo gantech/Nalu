@@ -229,7 +229,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         const double rhoBip = densityR;
 
         //  mdot
-        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac + mdot[k];
+        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac + mdot[ip];
         // rhs
         p_rhs[nearestNode] -= tmdot/projTimeScale;
 

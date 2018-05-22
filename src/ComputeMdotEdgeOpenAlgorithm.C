@@ -95,7 +95,7 @@ ComputeMdotEdgeOpenAlgorithm::execute()
   // time step; scale projection time scale by pstabFac (no divide by here)
   const double dt = realm_.get_time_step();
   const double gamma1 = realm_.get_gamma1();
-  const double projTimeScale = dt/gamma1*pstabFac;
+  const double projTimeScale = dt/gamma1;
 
   // interpolation for mdot uses nearest node, therefore, n/a
 
@@ -191,7 +191,7 @@ ComputeMdotEdgeOpenAlgorithm::execute()
         const double rhoBip = densityR;
 
         // mdot
-        double tmdot = 0.0; //-projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx;
+        double tmdot = 0.0; 
         for ( int j = 0; j < nDim; ++j ) {
           const double axj = areaVec[faceOffSet+j];
           const double coordIp = 0.5*(coordR[j] + coordL[j]);
