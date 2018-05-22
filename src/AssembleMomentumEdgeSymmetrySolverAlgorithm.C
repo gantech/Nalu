@@ -322,6 +322,13 @@ AssembleMomentumEdgeSymmetrySolverAlgorithm::execute()
       for (int in=0; in < b->size(); in++) {
           refNodeList[0] = (*b)[in];
           eqSystem_->linsys_->resetRows(refNodeList, 2, 3);
+      }
+  }
+  stk::mesh::BucketVector const& s_node_buckets =
+      realm_.get_buckets( stk::topology::NODE_RANK, s_locally_owned_union);
+  for (auto b: s_node_buckets) {
+      for (int in=0; in < b->size(); in++) {
+          refNodeList[0] = (*b)[in];
           const double * velN = stk::mesh::field_data(velocityNp1, refNodeList[0]);
           
           std::vector<double> lhs(9);
