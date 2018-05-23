@@ -190,6 +190,9 @@ public:
 
   // saved of mesh parts that are not to be projected
   std::vector<stk::mesh::Part *> notProjectedPart_;
+
+  std::vector<stk::mesh::Part *> openProjectedPart_;
+  
 };
 
 class ContinuityEquationSystem : public EquationSystem {

@@ -161,6 +161,8 @@ ComputeMdotAlgorithmDriver::post_work()
     solnOpts_.mdotAlgOpenIpCount_ = g_ip;
     correct_open_mdot(finalCorrection);
   }
+
+  provide_output();
 }
 
 //--------------------------------------------------------------------------
@@ -299,7 +301,21 @@ ComputeMdotAlgorithmDriver::correct_open_mdot(const double finalCorrection)
 {
   // extract field
   stk::mesh::MetaData & metaData = realm_.meta_data();
+  stk::mesh::BulkData & bulkData = realm_.bulk_data();
+  const int nDim = metaData.spatial_dimension();
+  
   GenericFieldType *openMassFlowRate = metaData.get_field<GenericFieldType>(metaData.side_rank(), "open_mass_flow_rate");
+
+  VectorFieldType *velocity = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
+
+  ScalarFieldType *density = metaData.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "density");
+  ScalarFieldType &densityNp1 = density->field_of_state(stk::mesh::StateNP1);
+
+  VectorFieldType *mdotCorrectionNode = metaData.get_field<VectorFieldType>(stk::topology::NODE_RANK, "mdot_correction_node");
+
+  GenericFieldType *exposedAreaVec = metaData.get_field<GenericFieldType>(metaData.side_rank(), "exposed_area_vector");
+  
   if ( NULL != openMassFlowRate ) {
     
     double mdotSum = 0.0;
@@ -308,12 +324,38 @@ ComputeMdotAlgorithmDriver::correct_open_mdot(const double finalCorrection)
     stk::mesh::Selector s_locally_owned = stk::mesh::selectField(*openMassFlowRate)    
       & !(realm_.get_inactive_selector());
     
+    stk::mesh::BucketVector const& p_node_buckets =
+        realm_.get_buckets( stk::topology::NODE_RANK, s_locally_owned );
+
+    // zero out mdot correction
+    for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
+          ib != p_node_buckets.end() ; ++ib ) {
+        stk::mesh::Bucket & b = **ib ;
+        const stk::mesh::Bucket::size_type length   = b.size();
+        double * mdotCorr = stk::mesh::field_data(*mdotCorrectionNode, b);
+        for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+            const size_t offSet = k*nDim;
+            for ( int j = 0; j < nDim; ++j ) {
+                mdotCorr[offSet+j] = 0.0;
+            }
+        }
+    }
+
+    // define vector of parent topos; should always be UNITY in size
+    std::vector<stk::topology> parentTopo;
+    
     stk::mesh::BucketVector const& face_buckets =
       realm_.get_buckets( metaData.side_rank(), s_locally_owned );
     for ( stk::mesh::BucketVector::const_iterator ib = face_buckets.begin();
           ib != face_buckets.end() ; ++ib ) {
       stk::mesh::Bucket & b = **ib ;
       
+      // extract connected element topology
+      b.parent_topology(stk::topology::ELEMENT_RANK, parentTopo);
+      ThrowAssert ( parentTopo.size() == 1 );
+      stk::topology theElemTopo = parentTopo[0];
+      MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(theElemTopo);
+
       // face master element
       MasterElement *meFC = MasterElementRepo::get_surface_master_element(b.topology());
       const int numScsBip = meFC->numIntPoints_;
@@ -323,15 +365,58 @@ ComputeMdotAlgorithmDriver::correct_open_mdot(const double finalCorrection)
       for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
         
         double * mdot    = stk::mesh::field_data(*openMassFlowRate, b, k);
+        const double * areaVec = stk::mesh::field_data(*exposedAreaVec, b, k);
+        // extract the connected element to this exposed face; should be single in size!
+        stk::mesh::Entity const * face_elem_rels = b.begin_elements(k);
+        // get element; its face ordinal number and populate face_node_ordinals
+        stk::mesh::Entity element = face_elem_rels[0];
+        const int face_ordinal = b.begin_element_ordinals(k)[0];
+        const int *face_node_ordinals = meSCS->side_node_ordinals(face_ordinal);
+        // get the relations from element
+        stk::mesh::Entity const * elem_node_rels = bulkData.begin_nodes(element);
 
         // loop over boundary ips and correct open mdot
         for ( int ip = 0; ip < numScsBip; ++ip ) {
-          mdot[ip] -= finalCorrection;
-          mdotSum += mdot[ip];
+            const int nearestNode = face_node_ordinals[ip];
+            stk::mesh::Entity nNode = elem_node_rels[nearestNode];
+
+            const int faceOffSet = ip*nDim; // offset for bip area vector
+            double asq = 0.0;
+            for ( int j = 0; j < nDim; ++j ) {
+                const double axj = areaVec[faceOffSet+j];
+                asq += axj*axj;
+            }
+              
+            double * mdotCorr = stk::mesh::field_data(*mdotCorrectionNode, nNode);
+            for ( int j = 0; j < nDim; ++j) {
+                const double axj = areaVec[faceOffSet+j];                  
+                mdotCorr[j] += finalCorrection * axj/asq ;
+            }
+            
+            mdot[ip] -= finalCorrection;
+            mdotSum += mdot[ip];
         }
       }
     }
 
+    std::vector<stk::mesh::FieldBase*> sumFieldMdotCorr(1, mdotCorrectionNode);
+    stk::mesh::parallel_sum(bulkData, sumFieldMdotCorr);
+
+    // apply mdot correction to nodes
+    for ( stk::mesh::BucketVector::const_iterator ib = p_node_buckets.begin() ;
+          ib != p_node_buckets.end() ; ++ib ) {
+        stk::mesh::Bucket & b = **ib ;
+        const stk::mesh::Bucket::size_type length   = b.size();
+        double * uNp1 = stk::mesh::field_data(velocityNp1, b);
+        double * rhoNp1 = stk::mesh::field_data(densityNp1, b);
+        double * mdotCorr = stk::mesh::field_data(*mdotCorrectionNode, b);        
+        for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+            const size_t offSet = k*nDim;
+            for ( int j = 0; j < nDim; ++j )
+                uNp1[offSet+j] -= mdotCorr[offSet+j]/rhoNp1[k];
+        }
+    }
+    
     // provide post corrected mdot
     double g_mdotSum = 0.0;
     stk::ParallelMachine comm = NaluEnv::self().parallel_comm();

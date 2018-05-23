@@ -846,6 +846,7 @@ LowMachEquationSystem::project_nodal_velocity()
   const int nDim = meta_data.spatial_dimension();
 
   // field that we need
+  VectorFieldType *mdotCorrectionNode = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "mdot_correction_node");
   VectorFieldType *velocity = momentumEqSys_->velocity_;
   VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
   VectorFieldType *uTmp = momentumEqSys_->uTmp_;
@@ -886,6 +887,41 @@ LowMachEquationSystem::project_nodal_velocity()
       }
     }
   }
+
+
+  // stk::mesh::Selector op_projected_nodes
+  //   = (stk::mesh::selectUnion(momentumEqSys_->openProjectedPart_)) &
+  //   stk::mesh::selectField(*dpdx);
+  // stk::mesh::BucketVector const& op_node_buckets =
+  //   realm_.get_buckets( stk::topology::NODE_RANK, op_projected_nodes );
+  
+  // // process loop
+  // for ( stk::mesh::BucketVector::const_iterator ib = op_node_buckets.begin() ;
+  //       ib != op_node_buckets.end() ; ++ib ) {
+  //   stk::mesh::Bucket & b = **ib ;
+  //   const stk::mesh::Bucket::size_type length   = b.size();
+  //   double * mdotCorr = stk::mesh::field_data(*mdotCorrectionNode, b);
+  //   double * uNp1 = stk::mesh::field_data(velocityNp1, b);
+  //   double * ut = stk::mesh::field_data(*uTmp, b);
+  //   double * dp = stk::mesh::field_data(*dpdx, b);
+  //   double * rho = stk::mesh::field_data(densityNp1, b);
+    
+  //   for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      
+  //     // Get scaling factor
+  //     const double fac = projTimeScale/rho[k];
+      
+  //     // projection step
+  //     const size_t offSet = k*nDim;
+  //     for ( int j = 0; j < nDim; ++j ) {
+  //         if(abs(mdotCorr[offSet+j]) < 1e-10) {
+  //             const double gdpx = dp[offSet+j] - ut[offSet+j];
+  //             uNp1[offSet+j] -= fac*gdpx;
+  //         }
+  //     }
+  //   }
+  // }
+  
 }
 
 void
@@ -1598,6 +1634,8 @@ MomentumEquationSystem::register_open_bc(
   // algorithm type
   const AlgorithmType algType = OPEN;
 
+  openProjectedPart_.push_back(part);
+  
   // register boundary data; open_velocity_bc
   stk::mesh::MetaData &meta_data = realm_.meta_data();
 
@@ -2727,9 +2765,13 @@ ContinuityEquationSystem::register_open_bc(
   // register boundary data
   stk::mesh::MetaData &meta_data = realm_.meta_data();
   ScalarFieldType *pressureBC = NULL;
+  VectorFieldType *mdotCorrectionNode = NULL;
   if ( !realm_.solutionOptions_->activateOpenMdotCorrection_ ) {
     pressureBC = &(meta_data.declare_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure_bc"));
     stk::mesh::put_field(*pressureBC, *part );
+  } else {
+    mdotCorrectionNode = &(meta_data.declare_field<VectorFieldType>(stk::topology::NODE_RANK, "mdot_correction_node"));
+    stk::mesh::put_field(*mdotCorrectionNode, *part );
   }
 
   VectorFieldType &dpdxNone = dpdx_->field_of_state(stk::mesh::StateNone);
