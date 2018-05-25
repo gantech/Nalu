@@ -271,6 +271,12 @@ class Realm {
   virtual void initial_work();
   
   void set_global_id();
+
+  /** Initialize the HYPRE global row IDs
+   *
+   *  \sa Realm::hypreGlobalId_
+   */
+  void set_hypre_global_id();
  
   /// check job for fitting in memory
   void check_job(bool get_node_count);
@@ -299,6 +305,8 @@ class Realm {
   bool get_noc_usage(
     const std::string dofname);
   bool get_shifted_grad_op(
+    const std::string dofname);
+  bool get_skew_symmetric(
     const std::string dofname);
   double get_divU();
 
@@ -443,6 +451,7 @@ class Realm {
   double timerTransferExecute_;
   double timerSkinMesh_;
   double timerPromoteMesh_;
+  double timerSortExposedFace_;
 
   NonConformalManager *nonConformalManager_;
   OversetManager *oversetManager_;
@@ -468,8 +477,12 @@ class Realm {
   // part for new edges
   stk::mesh::Part *edgesPart_;
 
+  // cheack that all exposed surfaces have a bc applied
   bool checkForMissingBcs_;
 
+  // check if there are negative Jacobians
+  bool checkJacobians_;
+  
   // types of physics
   bool isothermalFlow_;
   bool uniformFlow_;
@@ -511,7 +524,14 @@ class Realm {
   // mesh parts for all interior domains
   stk::mesh::PartVector interiorPartVec_;
 
-  // mesh parts for all boundary conditions
+  /** Vector holding side sets that have been registered with the boundary
+   * conditions in the input file.
+   *
+   * The member is intended to for use in Realm::enforce_bc_on_exposed_faces to
+   * check for "exposed surfaces" that might have not been assigned BCs in the
+   * input file.
+   *
+   */
   stk::mesh::PartVector bcPartVec_;
 
   // empty part vector should it be required
@@ -592,6 +612,43 @@ class Realm {
   stk::mesh::PartVector allNonConformalInteractingParts_;
 
   bool isFinalOuterIter_{false};
+
+  /** The starting index (global) of the HYPRE linear system in this MPI rank
+   *
+   *  Note that this is actually the offset into the linear system. This index
+   *  must be adjusted accordingly to account for multiple degrees of freedom on
+   *  a particular node. This is performed in sierra::nalu::HypreLinearSystem.
+   */
+  stk::mesh::EntityId hypreILower_;
+
+  /** The ending index (global) of the HYPRE linear system in this MPI rank
+   *
+   *  Note that this is actually the offset into the linear system. This index
+   *  must be adjusted accordingly to account for multiple degrees of freedom on
+   *  a particular node. This is performed in sierra::nalu::HypreLinearSystem.
+   */
+  stk::mesh::EntityId hypreIUpper_;
+
+  /** The total number of HYPRE nodes in the linear system
+   *
+   *  Note that this is not an MPI rank local quantity
+   */
+  stk::mesh::EntityId hypreNumNodes_;
+
+  /** Global Row IDs for the HYPRE linear system
+   *
+   *  The HYPRE IDs are different from STK IDs and Realm::naluGlobalId_ because
+   *  HYPRE expects contiguous IDs for matrix rows and further requires that the
+   *  IDs be ordered across MPI ranks; i.e., startIdx (MPI_rank + 1) =
+   *  endIdx(MPI_rank) + 1.
+   */
+  HypreIDFieldType* hypreGlobalId_{nullptr};
+
+  /** Flag indicating whether Hypre solver is being used for any of the equation
+   * systems.
+   */
+  bool hypreIsActive_{false};
+
 };
 
 } // namespace nalu

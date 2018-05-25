@@ -150,14 +150,15 @@ void test_ME_views(const std::vector<sierra::nalu::ELEM_DATA_NEEDED>& requests)
     driver.dataNeeded_.add_master_element_call(request, sierra::nalu::CURRENT_COORDINATES);
   }
 
+  sierra::nalu::MasterElement* meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(AlgTraits::topo_);
+  sierra::nalu::MasterElement* meSCV = sierra::nalu::MasterElementRepo::get_volume_master_element(AlgTraits::topo_);
+
   // Execute the loop and perform all tests
-  driver.execute([&](sierra::nalu::ScratchViews<DoubleType>& scratchViews,
-                     sierra::nalu::MasterElement* meSCS,
-                     sierra::nalu::MasterElement* meSCV) {
+  driver.execute([&](sierra::nalu::SharedMemData& smdata) {
       // Extract data from scratchViews
-      sierra::nalu::SharedMemView<DoubleType**>& v_coords = scratchViews.get_scratch_view_2D(
+      sierra::nalu::SharedMemView<DoubleType**>& v_coords = smdata.simdPrereqData.get_scratch_view_2D(
         *driver.coordinates_);
-      auto& meViews = scratchViews.get_me_views(sierra::nalu::CURRENT_COORDINATES);
+      auto& meViews = smdata.simdPrereqData.get_me_views(sierra::nalu::CURRENT_COORDINATES);
 
       if (meSCS != nullptr) {
         for(sierra::nalu::ELEM_DATA_NEEDED request : requests) {
@@ -188,6 +189,14 @@ void test_ME_views(const std::vector<sierra::nalu::ELEM_DATA_NEEDED>& requests)
               check_that_values_match(meViews.dndx_scv, &kokkos_me_gold::tet4_scv_grad_op[0]);
             }
           }
+          if ( request == sierra::nalu::SCV_SHIFTED_GRAD_OP ) {
+            if ( AlgTraits::topo_ == stk::topology::HEX_8 ) {
+              check_that_values_match(meViews.dndx_scv_shifted, &kokkos_me_gold::hex8_scv_shifted_grad_op[0]);
+            }
+            else if ( AlgTraits::topo_ == stk::topology::TET_4 ) {
+              check_that_values_match(meViews.dndx_scv_shifted, &kokkos_me_gold::tet4_scv_grad_op[0]);
+            }
+          }
         }
       }
     });
@@ -201,7 +210,8 @@ TEST(KokkosME, test_hex8_views)
 //   sierra::nalu::SCS_SHIFTED_GRAD_OP,
      sierra::nalu::SCS_GIJ,
      sierra::nalu::SCV_VOLUME,
-     sierra::nalu::SCV_GRAD_OP
+     sierra::nalu::SCV_GRAD_OP,
+     sierra::nalu::SCV_SHIFTED_GRAD_OP
     }
   );
 }
@@ -214,7 +224,8 @@ TEST(KokkosME, test_tet4_views)
      sierra::nalu::SCS_SHIFTED_GRAD_OP,
      sierra::nalu::SCS_GIJ,
      sierra::nalu::SCV_VOLUME, 
-     sierra::nalu::SCV_GRAD_OP
+     sierra::nalu::SCV_GRAD_OP,
+     sierra::nalu::SCV_SHIFTED_GRAD_OP
     }
   );
 }

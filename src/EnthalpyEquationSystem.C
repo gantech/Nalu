@@ -58,22 +58,27 @@
 #include <SolutionOptions.h>
 #include <ABLForcingAlgorithm.h>
 
-// nso
-#include <nso/ScalarNSOKeElemSuppAlg.h>
-#include <nso/ScalarNSOElemKernel.h>
-#include <nso/ScalarNSOElemSuppAlgDep.h>
-
 // template for kernels
 #include <AlgTraits.h>
-#include <KernelBuilder.h>
-#include <KernelBuilderLog.h>
+#include <kernel/KernelBuilder.h>
+#include <kernel/KernelBuilderLog.h>
 
-// consolidated
+// kernels
 #include <AssembleElemSolverAlgorithm.h>
-#include <ScalarMassElemKernel.h>
-#include <ScalarAdvDiffElemKernel.h>
-#include <ScalarUpwAdvDiffElemKernel.h>
+#include <kernel/ScalarMassElemKernel.h>
+#include <kernel/ScalarAdvDiffElemKernel.h>
+#include <kernel/ScalarUpwAdvDiffElemKernel.h>
+
+// bc kernels
+#include <kernel/ScalarOpenAdvElemKernel.h>
+
+// nso
+#include <nso/ScalarNSOElemKernel.h>
 #include <nso/ScalarNSOKeElemKernel.h>
+
+// nso to be deprecated
+#include <nso/ScalarNSOElemSuppAlgDep.h>
+#include <nso/ScalarNSOKeElemSuppAlg.h>
 
 // props
 #include <property_evaluator/EnthalpyPropertyEvaluator.h>
@@ -86,6 +91,9 @@
 #include <user_functions/FlowPastCylinderTempAuxFunction.h>
 #include <user_functions/VariableDensityNonIsoTemperatureAuxFunction.h>
 #include <user_functions/VariableDensityNonIsoEnthalpySrcNodeSuppAlg.h>
+
+#include <user_functions/BoussinesqNonIsoTemperatureAuxFunction.h>
+#include <user_functions/BoussinesqNonIsoEnthalpySrcNodeSuppAlg.h>
 
 // overset
 #include <overset/UpdateOversetFringeAlgorithmDriver.h>
@@ -110,6 +118,9 @@
 
 // stk_util
 #include <stk_util/parallel/ParallelReduce.hpp>
+
+// nalu utility
+#include <utils/StkHelpers.h>
 
 namespace sierra{
 namespace nalu{
@@ -553,6 +564,9 @@ EnthalpyEquationSystem::register_interior_algorithm(
         else if (sourceName == "VariableDensityNonIso" ) {
           suppAlg = new VariableDensityNonIsoEnthalpySrcNodeSuppAlg(realm_);
         }
+        else if (sourceName == "BoussinesqNonIso" ) {
+          suppAlg = new BoussinesqNonIsoEnthalpySrcNodeSuppAlg(realm_);
+        }
         else if (sourceName == "abl_forcing") {
           ThrowAssertMsg(
             ((NULL != realm_.ablForcingAlg_) &&
@@ -657,7 +671,7 @@ EnthalpyEquationSystem::register_inflow_bc(
 void
 EnthalpyEquationSystem::register_open_bc(
   stk::mesh::Part *part,
-  const stk::topology &/*theTopo*/,
+  const stk::topology &partTopo,
   const OpenBoundaryConditionData &openBCData)
 {
 
@@ -700,20 +714,46 @@ EnthalpyEquationSystem::register_open_bc(
   }
 
   // solver open; lhs
-  std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
-    = solverAlgDriver_->solverAlgMap_.find(algType);
-  if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
-    SolverAlgorithm *theAlg = NULL;
-    if ( realm_.realmUsesEdges_ ) {
-      theAlg = new AssembleScalarEdgeOpenSolverAlgorithm(realm_, part, this, enthalpy_, enthalpyBc, &dhdxNone, evisc_);
+  if ( realm_.solutionOptions_->useConsolidatedBcSolverAlg_ ) {
+    
+    auto& solverAlgMap = solverAlgDriver_->solverAlgorithmMap_;
+    
+    stk::topology elemTopo = get_elem_topo(realm_, *part);
+    
+    AssembleFaceElemSolverAlgorithm* faceElemSolverAlg = nullptr;
+    bool solverAlgWasBuilt = false;
+    
+    std::tie(faceElemSolverAlg, solverAlgWasBuilt) 
+      = build_or_add_part_to_face_elem_solver_alg(algType, *this, *part, elemTopo, solverAlgMap, "open");
+    
+    auto& activeKernels = faceElemSolverAlg->activeKernels_;
+    
+    if (solverAlgWasBuilt) {
+      
+      build_face_elem_topo_kernel_automatic<ScalarOpenAdvElemKernel>
+        (partTopo, elemTopo, *this, activeKernels, "enthalpy_open",
+         realm_.meta_data(), *realm_.solutionOptions_,
+         this, enthalpy_, enthalpyBc, dhdx_, evisc_, 
+         faceElemSolverAlg->faceDataNeeded_, faceElemSolverAlg->elemDataNeeded_);
+      
+    }
+  }
+  else {    
+    std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
+      = solverAlgDriver_->solverAlgMap_.find(algType);
+    if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
+      SolverAlgorithm *theAlg = NULL;
+      if ( realm_.realmUsesEdges_ ) {
+        theAlg = new AssembleScalarEdgeOpenSolverAlgorithm(realm_, part, this, enthalpy_, enthalpyBc, &dhdxNone, evisc_);
+      }
+      else {
+        theAlg = new AssembleScalarElemOpenSolverAlgorithm(realm_, part, this, enthalpy_, enthalpyBc, &dhdxNone, evisc_);
+      }
+      solverAlgDriver_->solverAlgMap_[algType] = theAlg;
     }
     else {
-      theAlg = new AssembleScalarElemOpenSolverAlgorithm(realm_, part, this, enthalpy_, enthalpyBc, &dhdxNone, evisc_);
+      itsi->second->partVec_.push_back(part);
     }
-    solverAlgDriver_->solverAlgMap_[algType] = theAlg;
-  }
-  else {
-    itsi->second->partVec_.push_back(part);
   }
 
 }
@@ -1060,6 +1100,9 @@ EnthalpyEquationSystem::register_initial_condition_fcn(
     if ( fcnName == "VariableDensityNonIso" ) {
       theAuxFunc = new VariableDensityNonIsoTemperatureAuxFunction();      
     }
+    else if ( fcnName == "BoussinesqNonIso" ) {
+      theAuxFunc = new BoussinesqNonIsoTemperatureAuxFunction();
+    }
     else {
       throw std::runtime_error("EnthalpyEquationSystem::register_initial_condition_fcn: limited user functions supported");
     }
@@ -1378,6 +1421,9 @@ EnthalpyEquationSystem::temperature_bc_setup(
     }
     else if ( fcnName == "VariableDensityNonIso" ) {
       theAuxFunc = new VariableDensityNonIsoTemperatureAuxFunction();
+    }
+    else if ( fcnName == "BoussinesqNonIso" ) {
+      theAuxFunc = new BoussinesqNonIsoTemperatureAuxFunction();
     }
     else {
       throw std::runtime_error("EnthalpyEquationSystem::temperature_bc_setup; limited user functions supported");

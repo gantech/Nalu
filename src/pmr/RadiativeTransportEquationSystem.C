@@ -34,14 +34,15 @@
 
 // template for kernels
 #include "AlgTraits.h"
-#include "KernelBuilder.h"
-#include "KernelBuilderLog.h"
+#include "kernel/KernelBuilder.h"
+#include "kernel/KernelBuilderLog.h"
 
-// consolidated
+// implemented kernels
 #include "AssembleElemSolverAlgorithm.h"
 #include "pmr/RadTransAdvectionSUCVElemKernel.h"
 #include "pmr/RadTransAbsorptionBlackBodyElemKernel.h"
 #include "pmr/RadTransIsotropicScatteringElemKernel.h"
+#include "pmr/RadTransWallElemKernel.h"
 
 // stk_util
 #include <stk_util/parallel/Parallel.hpp>
@@ -562,9 +563,8 @@ RadiativeTransportEquationSystem::register_interior_algorithm(
       build_topo_kernel_if_requested<RadTransIsotropicScatteringElemKernel>
         (partTopo, *this, activeKernels, "isotropic_scattering",
          realm_.bulk_data(), true, dataPreReqs);
-      
+
       report_invalid_supp_alg_names();
-      report_built_supp_alg_names();
     }
   }
 }
@@ -574,7 +574,7 @@ RadiativeTransportEquationSystem::register_interior_algorithm(
 void
 RadiativeTransportEquationSystem::register_wall_bc(
   stk::mesh::Part *part,
-  const stk::topology &/*theTopo*/,
+  const stk::topology &partTopo,
   const WallBoundaryConditionData &wallBCData)
 {
 
@@ -674,18 +674,40 @@ RadiativeTransportEquationSystem::register_wall_bc(
       bcDataMapAlg_.push_back(theCopyAlg);
     */
 
-    // solver; lhs: weak flux implementation
-    std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
-      = solverAlgDriver_->solverAlgMap_.find(algType);
-    if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
-      AssembleRadTransWallSolverAlgorithm *theAlg
-        = new AssembleRadTransWallSolverAlgorithm(realm_, part, this, realm_.realmUsesEdges_);
-      solverAlgDriver_->solverAlgMap_[algType] = theAlg;
+    // solver; lhs: weak bc flux implementation
+    if ( realm_.realmUsesEdges_ ) {
+      std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
+        = solverAlgDriver_->solverAlgMap_.find(algType);
+      if ( itsi == solverAlgDriver_->solverAlgMap_.end() ) {
+        AssembleRadTransWallSolverAlgorithm *theAlg
+          = new AssembleRadTransWallSolverAlgorithm(realm_, part, this, realm_.realmUsesEdges_);
+        solverAlgDriver_->solverAlgMap_[algType] = theAlg;
+      }
+      else {
+        itsi->second->partVec_.push_back(part);
+      }
     }
     else {
-      itsi->second->partVec_.push_back(part);
-    }
 
+      // element-based uses consolidated approach fully
+      auto& solverAlgMap = solverAlgDriver_->solverAlgorithmMap_;
+
+      AssembleElemSolverAlgorithm* solverAlg = nullptr;
+      bool solverAlgWasBuilt = false;
+      
+      std::tie(solverAlg, solverAlgWasBuilt) = build_or_add_part_to_face_bc_solver_alg(*this, *part, solverAlgMap, "wall");
+      
+      ElemDataRequests& dataPreReqs = solverAlg->dataNeededByKernels_;
+      auto& activeKernels = solverAlg->activeKernels_;
+      
+      if (solverAlgWasBuilt) {
+        build_face_topo_kernel_automatic<RadTransWallElemKernel>
+          (partTopo, *this, activeKernels, "rad_trans_wall_bc",
+           realm_.bulk_data(), this, false, dataPreReqs);
+
+        report_built_supp_alg_names();
+      } 
+    }
   }
   else {
     throw std::runtime_error("Hmmm... Does it make sense to not specify a temperature?");
@@ -808,25 +830,28 @@ RadiativeTransportEquationSystem::solve_and_update()
     compute_bc_intensity();
     isInit_ = false;
   }
-
+  
   compute_radiation_source();
-
+  
+  // extract equation system status before first iteration or first ordinate solve
+  bool firstTimeStepSolve = firstTimeStepSolve_;
+  
   for ( int i = 0; i < maxIterations_; ++i ) {
-
+    
     // zero out qj, G; irradiation
     zero_out_fields();
     zero_irradiation();
-
+    
     NaluEnv::self().naluOutputP0() << "   "
-                    << userSuppliedName_ << " Iteration: " << i+1 << "/" << maxIterations_ << std::endl;
-
+                                   << userSuppliedName_ << " Iteration: " << i+1 << "/" << maxIterations_ << std::endl;
+    
     double nonLinearResidualSum = 0.0;
     double linearIterationsSum = 0.0;
     for ( int k = 0; k < ordinateDirections_; ++k ) {
-
+      
       // unload Sk and weight for this ordinate direction k
       set_current_ordinate_info(k);
-
+      
       // intensity RTE assemble, load_complete and solve
       assemble_and_solve(iTmp_);
       
@@ -840,57 +865,55 @@ RadiativeTransportEquationSystem::solve_and_update()
         realm_.get_activate_aura());
       double timeB = NaluEnv::self().nalu_time();
       timerAssemble_ += (timeB-timeA);
-   
+      
       // assemble qj, G; operates on intensity_
       assemble_fields();
-
+      
       assemble_irradiation();
-
+      
       // copy intensity_ back to intensity_k
       copy_ordinate_intensity(*intensity_, *currentIntensity_);
-
+      
       // increment solve counts and norms
       linearIterationsSum += linsys_->linearSolveIterations();
       nonLinearResidualSum += linsys_->nonLinearResidual();
-
+      
     }
-
+    
     // save total nonlinear residual
     nonLinearResidualSum_ = nonLinearResidualSum/double(ordinateDirections_);
-
-    // sa
-    if ( realm_.currentNonlinearIteration_ == 1 )
-      firstNonLinearResidualSum_ = nonLinearResidualSum_;
-
+    
+    // save the very first nonlinear residual
+    if ( firstTimeStepSolve  ) {
+      firstNonLinearResidualSum_ = std::max(std::numeric_limits<double>::epsilon(), nonLinearResidualSum_);
+      firstTimeStepSolve = false;
+    }
+    
     // normalize_irradiation
     normalize_irradiation();
-
+    
     // compute boundary intensity
     compute_bc_intensity();
-
+    
     // compute divRadFLux and norm
     compute_div_norm();
     copy_ordinate_intensity(*scalarFlux_, *scalarFluxOld_);
-
+    
     // dump norm and averages
     NaluEnv::self().naluOutputP0()
       << "EqSystem Name:       " << userSuppliedName_ << std::endl
       << "   aver iters      = " << linearIterationsSum/double(ordinateDirections_) << std::endl
-      << "nonlinearResidNrm  = " << nonLinearResidualSum/double(ordinateDirections_) 
+      << "nonlinearResidNrm  = " << nonLinearResidualSum_
       << " scaled: " << nonLinearResidualSum_/firstNonLinearResidualSum_ << std::endl
       << "Scalar flux norm   = " << systemL2Norm_ << std::endl;
     NaluEnv::self().naluOutputP0() << std::endl;
-
-    // check for convergence; min between nonlinear and "for show" system norm
-    const double bestConverged
-      = std::min(nonLinearResidualSum/double(ordinateDirections_), systemL2Norm_);
-    if ( bestConverged < convergenceTolerance_ ) {
-      NaluEnv::self().naluOutputP0() << "Intensity Equation System Converged" << std::endl;
+    
+    // check for convergence
+    if ( system_is_converged() ) {
+      NaluEnv::self().naluOutputP0() << "Local Iteration Intensity Equation System Converged" << std::endl;
       break;
     }
-
   }
-
 }
 
 //--------------------------------------------------------------------------
@@ -901,7 +924,9 @@ RadiativeTransportEquationSystem::system_is_converged()
 {
   bool isConverged = true;
   if ( NULL != linsys_ ) {
-    isConverged = (nonLinearResidualSum_/firstNonLinearResidualSum_ <  convergenceTolerance_ );
+    const double bestConverged
+      = std::min(nonLinearResidualSum_/firstNonLinearResidualSum_, systemL2Norm_);
+    isConverged = (bestConverged <  convergenceTolerance_ );
   }
   return isConverged;
 }

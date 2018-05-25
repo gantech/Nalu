@@ -37,9 +37,10 @@ namespace sierra{
 namespace nalu{
 
 //-------- pyr_deriv -------------------------------------------------------
+template <typename DerivType>
 void pyr_deriv(const int npts,
   const double *intgLoc,
-  SharedMemView<DoubleType***>& deriv)
+  DerivType& deriv)
 {
   // d3d(c,s,j) = deriv[c + 3*(s + 5*j)] = deriv[c+3s+15j]
 
@@ -368,7 +369,19 @@ void PyrSCV::grad_op(
     SharedMemView<DoubleType***>& deriv)
 {
   pyr_deriv(numIntPoints_, &intgLoc_[0], deriv);
-  generic_grad_op_3d<AlgTraitsPyr5>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
+}
+
+//--------------------------------------------------------------------------
+//-------- shifted_grad_op ---------------------------------------------------------
+//--------------------------------------------------------------------------
+void PyrSCV::shifted_grad_op(
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop,
+    SharedMemView<DoubleType***>& deriv)
+{
+  pyr_deriv(numIntPoints_, &intgLocShift_[0], deriv);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
 }
 
 void PyrSCV::determinant(
@@ -743,7 +756,7 @@ void PyrSCS::grad_op(
     SharedMemView<DoubleType***>& deriv)
 {
   pyr_deriv(numIntPoints_, &intgLoc_[0], deriv);
-  generic_grad_op_3d<AlgTraitsPyr5>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
 }
 
 void PyrSCS::grad_op(
@@ -766,7 +779,7 @@ void PyrSCS::grad_op(
       coords, gradop, det_j, error, &lerr );
 
   if ( lerr )
-    std::cout << "sorry, negative PyrSCS volume.." << std::endl;
+    NaluEnv::self().naluOutput() << "sorry, negative PyrSCS volume.." << std::endl;
 }
 
 //--------------------------------------------------------------------------
@@ -778,7 +791,7 @@ void PyrSCS::shifted_grad_op(
     SharedMemView<DoubleType***>& deriv)
 {
   pyr_deriv(numIntPoints_, &intgLocShift_[0], deriv);
-  generic_grad_op_3d<AlgTraitsPyr5>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
 }
 
 void PyrSCS::shifted_grad_op(
@@ -801,7 +814,7 @@ void PyrSCS::shifted_grad_op(
       coords, gradop, det_j, error, &lerr );
 
   if ( lerr )
-    std::cout << "sorry, negative PyrSCS volume.." << std::endl;
+    NaluEnv::self().naluOutput() << "sorry, negative PyrSCS volume.." << std::endl;
 }
 
 //--------------------------------------------------------------------------
@@ -838,14 +851,94 @@ void PyrSCS::face_grad_op(
           &coords[15*n], &gradop[k*nelem*15+n*15], &det_j[npf*n+k], error, &lerr );
       
       if ( lerr )
-        std::cout << "problem with PyrSCS::face_grad_op." << std::endl;
+        NaluEnv::self().naluOutput() << "problem with PyrSCS::face_grad_op." << std::endl;
     }
   }
+}
+
+void PyrSCS::face_grad_op_quad(const int face_ordinal, const bool shifted, 
+                               SharedMemView<DoubleType**>& coords, QuadFaceGradType& gradop)
+{
+  using tri_traits = AlgTraitsTri3Pyr5;
+  using quad_traits = AlgTraitsQuad4Pyr5;
+
+  // quad4 is the only face that can be safely shifted
+  const double *p_intgExp = (!shifted || face_ordinal < 4 ) ? &intgExpFace_[0] : &intgExpFaceShift_[0];
+
+  constexpr int derivSize = quad_traits::numFaceIp_ *  quad_traits::nodesPerElement_ * quad_traits::nDim_;
+
+  DoubleType NALU_ALIGN(64) psi[derivSize];
+  QuadFaceGradType deriv(psi,quad_traits::numFaceIp_,quad_traits::nodesPerElement_,quad_traits::nDim_);
+
+  const int offset = (face_ordinal != 4) ? 0 : tri_traits::nDim_ * tri_traits::numFaceIp_ * face_ordinal;
+  pyr_deriv(quad_traits::numFaceIp_, &p_intgExp[offset], deriv);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
+}
+
+void PyrSCS::face_grad_op_tri(const int face_ordinal, const bool shifted, 
+                               SharedMemView<DoubleType**>& coords, TriFaceGradType& gradop)
+{
+  using tri_traits = AlgTraitsTri3Pyr5;
+  // quad4 is the only face that can be safely shifted
+  const double *p_intgExp = (!shifted || face_ordinal < 4 ) ? &intgExpFace_[0] : &intgExpFaceShift_[0];
+
+  constexpr int derivSize = tri_traits::numFaceIp_ *  tri_traits::nodesPerElement_ * tri_traits::nDim_;
+  DoubleType NALU_ALIGN(64) psi[derivSize];
+  TriFaceGradType deriv(psi,tri_traits::numFaceIp_,tri_traits::nodesPerElement_,tri_traits::nDim_ );
+
+  const int offset = (face_ordinal != 4) ? tri_traits::nDim_ * tri_traits::numFaceIp_ * face_ordinal : 0;
+  pyr_deriv(tri_traits::numFaceIp_, &p_intgExp[offset], deriv);
+  generic_grad_op<AlgTraitsPyr5>(deriv, coords, gradop);
+}
+
+void PyrSCS::face_grad_op(
+  const int face_ordinal,
+  const bool shifted,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  using tri_traits = AlgTraitsTri3Pyr5;
+  using quad_traits = AlgTraitsQuad4Pyr5;
+
+  constexpr int quad_derivSize = quad_traits::numFaceIp_ *  quad_traits::nodesPerElement_ * quad_traits::nDim_;
+  DoubleType NALU_ALIGN(64) quad_grad_temp[quad_derivSize];
+  QuadFaceGradType quad_gradop(quad_grad_temp,quad_traits::numFaceIp_,quad_traits::nodesPerElement_,quad_traits::nDim_);
+  face_grad_op_quad(face_ordinal, shifted, coords, quad_gradop);
+
+  constexpr int tri_derivSize = tri_traits::numFaceIp_ *  tri_traits::nodesPerElement_ * tri_traits::nDim_;
+  DoubleType NALU_ALIGN(64) tri_grad_temp[tri_derivSize];
+  TriFaceGradType tri_gradop(tri_grad_temp,tri_traits::numFaceIp_,tri_traits::nodesPerElement_,tri_traits::nDim_ );
+  face_grad_op_tri(face_ordinal, shifted, coords, tri_gradop);
+
+  const int length = (face_ordinal == 4) ? quad_derivSize : tri_derivSize;
+  DoubleType triMask = (face_ordinal == 4) ? 0: 1;
+  DoubleType* gradop_ptr = gradop.ptr_on_device();
+  for (int k = 0; k < length; ++k) {
+    gradop_ptr[k] = (1 - triMask) * quad_grad_temp[k] + triMask * tri_grad_temp[k];
+  }
+}
+
+void PyrSCS::face_grad_op(
+  int face_ordinal,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  constexpr bool shifted = false;
+  face_grad_op(face_ordinal, shifted, coords, gradop);
 }
 
 //--------------------------------------------------------------------------
 //-------- shifted_face_grad_op -------------------------------------------
 //--------------------------------------------------------------------------
+void PyrSCS::shifted_face_grad_op(
+  int face_ordinal,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  constexpr bool shifted = true;
+  face_grad_op(face_ordinal, shifted, coords, gradop);
+}
+
 void PyrSCS::shifted_face_grad_op(
   const int nelem,
   const int face_ordinal,
@@ -879,7 +972,7 @@ void PyrSCS::shifted_face_grad_op(
           &coords[15*n], &gradop[k*nelem*15+n*15], &det_j[npf*n+k], error, &lerr );
 
       if ( lerr )
-        std::cout << "problem with PyrSCS::shifted_face_grad_op." << std::endl;
+        NaluEnv::self().naluOutput() << "problem with PyrSCS::shifted_face_grad_op." << std::endl;
 
     }
   }
@@ -1024,7 +1117,7 @@ PyrSCS::general_face_grad_op(
       &coords[0], &gradop[0], &det_j[0], error, &lerr );
   
   if ( lerr )
-    std::cout << "PyrSCS::general_face_grad_op: issue.." << std::endl;
+    NaluEnv::self().naluOutput() << "PyrSCS::general_face_grad_op: issue.." << std::endl;
   
 }
 

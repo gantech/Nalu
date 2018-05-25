@@ -39,12 +39,15 @@ typedef Teuchos::ScalarTraits<Scalar> STS;
 #include <MueLu_TpetraOperator.hpp>
 
 #include <MueLu_UseShortNames.hpp>    // => typedef MueLu::FooClass<Scalar, LocalOrdinal, ...> Foo
+#include <limits>
 
 namespace sierra{
 namespace nalu{
 
+/** Type of solvers available in Nalu simulation **/
   enum PetraType {
-    PT_TPETRA,
+    PT_TPETRA,       //!< Nalu Tpetra interface
+    PT_HYPRE,        //!< Direct HYPRE interface
     PT_END
   };
 
@@ -52,39 +55,151 @@ namespace nalu{
 class LinearSolvers;
 class Simulation;
 
+const LocalOrdinal INVALID = std::numeric_limits<LocalOrdinal>::max();
+
+/** LocalGraphArrays is a helper class for building the arrays describing
+ * the local csr graph, rowPointers and colIndices. These arrays are passed
+ * to the TpetraCrsGraph::setAllIndices method. This helper class is used
+ * within nalu's TpetraLinearSystem class.
+ * See unit-tests in UnitTestLocalGraphArrays.C.
+ */
+class LocalGraphArrays {
+public:
+
+  LocalGraphArrays(const Kokkos::View<size_t*,HostSpace>& rowLengths)
+  : rowPointers(Kokkos::View<size_t*>(Kokkos::ViewAllocateWithoutInitializing("rowPtrs"),rowLengths.size()+1)),
+    rowPointersData(rowPointers.data()),
+    colIndices()
+  {
+    size_t nnz = compute_row_pointers(rowPointers, rowLengths);
+    colIndices = Kokkos::View<LocalOrdinal*,HostSpace>(Kokkos::ViewAllocateWithoutInitializing("colIndices"), nnz);
+    Kokkos::deep_copy(colIndices, INVALID);
+  }
+
+  size_t get_row_length(size_t localRow) const { return rowPointersData[localRow+1]-rowPointersData[localRow]; }
+
+  void insertIndices(size_t localRow, size_t numInds, const LocalOrdinal* inds, int numDof)
+  {
+    LocalOrdinal* row = &colIndices(rowPointersData[localRow]);
+    size_t rowLen = get_row_length(localRow);
+    LocalOrdinal* rowEnd = std::find(row, row+rowLen, INVALID);
+    for(size_t i=0; i<numInds; ++i) {
+      LocalOrdinal* insertPoint = std::lower_bound(row, rowEnd, inds[i]);
+      if (insertPoint <= rowEnd && *insertPoint != inds[i]) {
+        insert(inds[i], numDof, insertPoint, rowEnd+numDof);
+        rowEnd += numDof;
+      }
+    }
+  }
+
+  static size_t compute_row_pointers(Kokkos::View<size_t*,HostSpace>& rowPtrs,
+                                   const Kokkos::View<size_t*,HostSpace>& rowLengths)
+  {
+    size_t nnz = 0;
+    size_t* rowPtrData = rowPtrs.data();
+    const size_t* rowLens = rowLengths.data();
+    for(unsigned i=0, iend=rowLengths.size(); i<iend; ++i) {
+      rowPtrData[i] = nnz;
+      nnz += rowLens[i];
+    }
+    rowPtrData[rowLengths.size()] = nnz;
+    return nnz;
+  }
+
+  Kokkos::View<size_t*,HostSpace> rowPointers;
+  const size_t* rowPointersData;
+  Kokkos::View<LocalOrdinal*,HostSpace> colIndices;
+
+private:
+
+  void insert(LocalOrdinal ind, int numDof, LocalOrdinal* insertPoint, LocalOrdinal* rowEnd)
+  {
+    for(LocalOrdinal* ptr = rowEnd-1; ptr!= insertPoint; --ptr) {
+        *ptr = *(ptr-numDof);
+    }
+    for(int i=0; i<numDof; ++i) {
+      *insertPoint++ = ind+i;
+    }
+  }
+};
+
+/** An abstract representation of a linear solver in Nalu
+ *
+ *  Defines the basic API supported by the linear solvers for use within Nalu.
+ *  See concrete implementations such as sierra::nalu::TpetraLinearSolver for
+ *  more details.
+ */
 class LinearSolver
 {
   public:
-  LinearSolver(std::string name, LinearSolvers *linearSolvers,
-    bool recompute_preconditioner, bool reuse_preconditioner) : name_(name), linearSolvers_(linearSolvers),
-    recomputePreconditioner_(recompute_preconditioner), reusePreconditioner_(reuse_preconditioner), timerPrecond_(0.0) {}
-  virtual ~LinearSolver() {}
-  std::string name_;
-  virtual PetraType getType() = 0;
-  Simulation *root();
-  LinearSolvers *parent();
-  LinearSolvers *linearSolvers_;
+    LinearSolver(
+      std::string name,
+      LinearSolvers* linearSolvers,
+      LinearSolverConfig* config)
+      : name_(name),
+        linearSolvers_(linearSolvers),
+        config_(config),
+        recomputePreconditioner_(config->recomputePreconditioner()),
+        reusePreconditioner_(config->reusePreconditioner()),
+        timerPrecond_(0.0)
+    {}
+    virtual ~LinearSolver() {}
+
+  //! User-friendly identifier for this particular solver instance
+    std::string name_;
+
+  //! Type of solver instance as defined in sierra::nalu::PetraType
+    virtual PetraType getType() = 0;
+
+  /** Utility method to cleanup solvers during simulation
+   */
+    virtual void destroyLinearSolver() = 0;
+
+    Simulation* root();
+    LinearSolvers* parent();
+    LinearSolvers* linearSolvers_;
+
   protected:
+  LinearSolverConfig* config_;
   bool recomputePreconditioner_;
   bool reusePreconditioner_;
   double timerPrecond_;
+  bool activateMueLu_{false};
+
   public:
+  //! Flag indicating whether the preconditioner is recomputed on each invocation
   bool & recomputePreconditioner() {return recomputePreconditioner_;}
+  //! Flag indicating whether the preconditioner is reused on each invocation
   bool & reusePreconditioner() {return reusePreconditioner_;}
+
+  //! Reset the preconditioner timer to 0.0 for future accumulation
   void zero_timer_precond() { timerPrecond_ = 0.0;}
+
+  //! Get the preconditioner timer for the last invocation
   double get_timer_precond() { return timerPrecond_;}
+
+  //! Flag indicating whether the user has activated MueLU
+  bool& activeMueLu() { return activateMueLu_; }
+
+  //! Get the solver configuration specified in the input file
+  LinearSolverConfig* getConfig() { return config_; }
 };
 
 class TpetraLinearSolver : public LinearSolver
 {
   public:
 
+  /**
+   *  @param[in] solverName The name of the solver
+   *  @param[in] config Solver configuration
+   */
   TpetraLinearSolver(
     std::string solverName,
     TpetraLinearSolverConfig *config,
-    const Teuchos::RCP<Teuchos::ParameterList> params, const Teuchos::RCP<Teuchos::ParameterList> paramsPrecond,
+    const Teuchos::RCP<Teuchos::ParameterList> params,
+    const Teuchos::RCP<Teuchos::ParameterList> paramsPrecond,
     LinearSolvers *linearSolvers);
-  ~TpetraLinearSolver() ;
+  virtual ~TpetraLinearSolver() ;
   
     void setSystemObjects(
       Teuchos::RCP<LinSys::Matrix> matrix,
@@ -96,26 +211,39 @@ class TpetraLinearSolver : public LinearSolver
       Teuchos::RCP<LinSys::Vector> rhs,
       Teuchos::RCP<LinSys::MultiVector> coords);
 
-    void destroyLinearSolver();
+    virtual void destroyLinearSolver() override;
 
+  //! Initialize the MueLU preconditioner before solve
     void setMueLu();
 
+  /** Compute the norm of the non-linear solution vector
+   *
+   *  @param[in] whichNorm [0, 1, 2] norm to be computed
+   *  @param[in] sln The solution vector
+   *  @param[out] norm The norm of the solution vector
+   */
     int residual_norm(int whichNorm, Teuchos::RCP<LinSys::Vector> sln, double& norm);
 
+  /** Solve the linear system Ax = b
+   *
+   *  @param[out] sln The solution vector
+   *  @param[out] iterationCount The number of linear solver iterations to convergence
+   *  @param[out] scaledResidual The final residual norm
+   *  @param[in]  isFinalOuterIter Is this the final outer iteration
+   */
     int solve(
       Teuchos::RCP<LinSys::Vector> sln,
       int & iterationCount,
       double & scaledResidual,
       bool isFinalOuterIter);
 
-    virtual PetraType getType() { return PT_TPETRA; }
-    TpetraLinearSolverConfig *getConfig() { return config_; }
-
-    bool & activeMueLu(){ return activateMueLu_; }
+    virtual PetraType getType() override { return PT_TPETRA; }
 
   private:
-    TpetraLinearSolverConfig *config_;
+  //! The solver parameters
     const Teuchos::RCP<Teuchos::ParameterList> params_;
+
+  //! The preconditioner parameters
     const Teuchos::RCP<Teuchos::ParameterList> paramsPrecond_;
     Teuchos::RCP<LinSys::Matrix> matrix_;
     Teuchos::RCP<LinSys::Vector> rhs_;
@@ -125,7 +253,6 @@ class TpetraLinearSolver : public LinearSolver
     Teuchos::RCP<MueLu::TpetraOperator<SC,LO,GO,NO> > mueluPreconditioner_;
     Teuchos::RCP<LinSys::MultiVector> coords_;
 
-    bool activateMueLu_;
     std::string preconditionerType_;
 };
 

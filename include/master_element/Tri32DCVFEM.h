@@ -44,6 +44,11 @@ public:
     SharedMemView<DoubleType***>& gradop,
     SharedMemView<DoubleType***>& deriv) override ;
 
+  void shifted_grad_op(
+    SharedMemView<DoubleType**>&coords,
+    SharedMemView<DoubleType***>&gradop,
+    SharedMemView<DoubleType***>&deriv) override ;
+
   void determinant(
     const int nelem,
     const double *coords,
@@ -109,12 +114,22 @@ public:
     double * error ) override;
 
   void face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
+
+  void face_grad_op(
     const int nelem,
     const int face_ordinal,
     const double *coords,
     double *gradop,
     double *det_j,
     double * error ) override;
+
+  void shifted_face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
 
   void shifted_face_grad_op(
     const int nelem,
@@ -148,6 +163,12 @@ public:
     const int &npts,
     const double *par_coord, 
     double* shape_fcn);
+
+  void
+  general_shape_fcn(const int numIp, const double* isoParCoord, double* shpfc) override
+  {
+    tri_shape_fcn(numIp, isoParCoord, shpfc);
+  }
 
   int opposingNodes(
     const int ordinal, const int node) override;

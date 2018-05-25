@@ -38,6 +38,7 @@ SolutionOptions::SolutionOptions()
     turbPrDefault_(1.0),
     nocDefault_(true),
     shiftedGradOpDefault_(false),
+    skewSymmetricDefault_(false),
     tanhFormDefault_("classic"),
     tanhTransDefault_(2.0),
     tanhWidthDefault_(4.0),
@@ -81,12 +82,14 @@ SolutionOptions::SolutionOptions()
     inputVariablesPeriodicTime_(0.0),
     consistentMMPngDefault_(false),
     useConsolidatedSolverAlg_(false),
+    useConsolidatedBcSolverAlg_(false),
     eigenvaluePerturb_(false),
     eigenvaluePerturbDelta_(0.0),
     eigenvaluePerturbBiasTowards_(3),
     eigenvaluePerturbTurbKe_(0.0),
     earthAngularVelocity_(7.2921159e-5),
     latitude_(0.0),
+    raBoussinesqTimeScale_(-1.0),
     mdotAlgAccumulation_(0.0),
     mdotAlgInflow_(0.0),
     mdotAlgOpen_(0.0),
@@ -150,6 +153,9 @@ SolutionOptions::load(const YAML::Node & y_node)
 
     // check for consolidated solver alg (AssembleSolver)
     get_if_present(y_solution_options, "use_consolidated_solver_algorithm", useConsolidatedSolverAlg_, useConsolidatedSolverAlg_);
+
+    // check for consolidated face-elem bc alg
+    get_if_present(y_solution_options, "use_consolidated_face_elem_bc_algorithm", useConsolidatedBcSolverAlg_, useConsolidatedBcSolverAlg_);
 
     // eigenvalue purturbation; over all dofs...
     get_if_present(y_solution_options, "eigenvalue_perturbation", eigenvaluePerturb_);
@@ -250,7 +256,7 @@ SolutionOptions::load(const YAML::Node & y_node)
           ySrc >> elemSrcTermsMap_ ;
         }
         else if (expect_map( y_option, "source_term_parameters", optional)) {
-	  y_option["source_term_parameters"] >> srcTermParamMap_ ;
+          y_option["source_term_parameters"] >> srcTermParamMap_ ;
         }
         else if (expect_map( y_option, "element_source_term_parameters", optional)) {
           y_option["element_source_term_parameters"] >> elemSrcTermParamMap_ ;
@@ -263,6 +269,9 @@ SolutionOptions::load(const YAML::Node & y_node)
         }
         else if (expect_map( y_option, "shifted_gradient_operator", optional)) {
           y_option["shifted_gradient_operator"] >> shiftedGradOpMap_ ;
+        }
+        else if (expect_map( y_option, "skew_symmetric_advection", optional)) {
+          y_option["skew_symmetric_advection"] >> skewSymmetricMap_;
         }
         else if (expect_map( y_option, "input_variables_from_file", optional)) {
           y_option["input_variables_from_file"] >> inputVarFromFileMap_ ;
@@ -301,8 +310,10 @@ SolutionOptions::load(const YAML::Node & y_node)
           get_if_present(y_user_constants, "reference_temperature",  referenceTemperature_, referenceTemperature_);
           get_if_present(y_user_constants, "thermal_expansion_coefficient",  thermalExpansionCoeff_, thermalExpansionCoeff_);
           get_if_present(y_user_constants, "stefan_boltzmann",  stefanBoltzmann_, stefanBoltzmann_);
-	  get_if_present(y_user_constants, "earth_angular_velocity", earthAngularVelocity_, earthAngularVelocity_);
-	  get_if_present(y_user_constants, "latitude", latitude_, latitude_);
+          get_if_present(y_user_constants, "earth_angular_velocity", earthAngularVelocity_, earthAngularVelocity_);
+          get_if_present(y_user_constants, "latitude", latitude_, latitude_);
+          get_if_present(y_user_constants, "boussinesq_time_scale", raBoussinesqTimeScale_, raBoussinesqTimeScale_);
+
           if (expect_sequence( y_user_constants, "gravity", optional) ) {
             const int gravSize = y_user_constants["gravity"].size();
             gravity_.resize(gravSize);
@@ -666,6 +677,9 @@ SolutionOptions::initialize_turbulence_constants()
   turbModelConstantMap_[TM_CbTwo] = 0.35;
   turbModelConstantMap_[TM_SDRWallFactor] = 1.0;
   turbModelConstantMap_[TM_zCV] = 0.5;
+  turbModelConstantMap_[TM_ci] = 0.9;
+  turbModelConstantMap_[TM_elog] = 9.8;
+  turbModelConstantMap_[TM_yplus_crit] = 11.63;
 }
 
 
@@ -728,6 +742,18 @@ SolutionOptions::get_shifted_grad_op(const std::string& dofName) const
   return factor;
 }
 
+bool
+SolutionOptions::get_skew_symmetric(const std::string& dofName) const
+{
+  bool factor = skewSymmetricDefault_;
+  auto iter = skewSymmetricMap_.find(dofName);
+
+  if (iter != skewSymmetricMap_.end())
+    factor = iter->second;
+
+  return factor;
+}
+
 std::vector<double>
 SolutionOptions::get_gravity_vector(const unsigned nDim) const
 {
@@ -752,6 +778,24 @@ SolutionOptions::get_turb_model_constant(
   else {
     throw std::runtime_error("unknown (not found) turbulence model constant");
   }
+}
+
+bool
+SolutionOptions::get_noc_usage(
+  const std::string &dofName ) const
+{
+  bool factor = nocDefault_;
+  std::map<std::string, bool>::const_iterator iter
+    = nocMap_.find(dofName);
+  if (iter != nocMap_.end()) {
+    factor = (*iter).second;
+  }
+  return factor;
+}
+
+bool SolutionOptions::has_set_boussinesq_time_scale()
+{
+  return (raBoussinesqTimeScale_ > std::numeric_limits<double>::min());
 }
 
 } // namespace nalu

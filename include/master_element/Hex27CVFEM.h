@@ -55,6 +55,8 @@ public:
     return interpWeights;
   }
 
+
+
   template <typename ViewType>
   ViewType copy_deriv_weights_to_view(const std::vector<double>& derivs)
   {
@@ -103,6 +105,8 @@ public:
     }
     return referenceGradWeights;
   }
+
+
 
 
 protected:
@@ -209,6 +213,11 @@ public:
     SharedMemView<DoubleType***>&gradop,
     SharedMemView<DoubleType***>&deriv);
 
+  void shifted_grad_op(
+    SharedMemView<DoubleType**>&coords,
+    SharedMemView<DoubleType***>&gradop,
+    SharedMemView<DoubleType***>&deriv);
+
   void determinant(
     const int nelem,
     const double *coords,
@@ -252,6 +261,7 @@ class Hex27SCS : public HexahedralP2Element
 {
   using InterpWeightType = Kokkos::View<DoubleType[AlgTraits::numScsIp_][AlgTraits::nodesPerElement_]>;
   using GradWeightType = Kokkos::View<DoubleType[AlgTraits::numScsIp_][AlgTraits::nodesPerElement_][AlgTraits::nDim_]>;
+  using ExpGradWeightType = Kokkos::View<DoubleType[6*AlgTraitsQuad9Hex27::numFaceIp_][AlgTraits::nodesPerElement_][AlgTraits::nDim_]>;
 
 public:
   Hex27SCS();
@@ -280,6 +290,11 @@ public:
     SharedMemView<DoubleType***>& gupper,
     SharedMemView<DoubleType***>& glower,
     SharedMemView<DoubleType***>& deriv);
+
+  void face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
 
   void determinant(
     const int nelem,
@@ -444,6 +459,8 @@ private:
 
   InterpWeightType shiftedInterpWeights_;
   GradWeightType shiftedReferenceGradWeights_;
+
+  ExpGradWeightType expReferenceGradWeights_;
 
   int ipsPerFace_;
 };

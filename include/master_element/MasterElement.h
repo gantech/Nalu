@@ -71,6 +71,18 @@ public:
     SharedMemView<DoubleType***>&deriv) {
     throw std::runtime_error("shifted_grad_op using SharedMemView is not implemented");}
 
+  virtual void face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) {
+    throw std::runtime_error("face_grad_op using SharedMemView is not implemented");}
+
+  virtual void shifted_face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) {
+    throw std::runtime_error("shifted_face_grad_op using SharedMemView is not implemented");}
+
   virtual void grad_op_fem(
     SharedMemView<DoubleType**>&coords,
     SharedMemView<DoubleType***>&gradop,
@@ -143,6 +155,7 @@ public:
     double * error ) {
     throw std::runtime_error("nodal_grad_op not implemented");}
 
+
   virtual void face_grad_op(
     const int nelem,
     const int face_ordinal,
@@ -151,6 +164,7 @@ public:
     double *det_j,
     double * error ) {
     throw std::runtime_error("face_grad_op not implemented; avoid this element type at open bcs, walls and symms");}
+
 
   virtual void shifted_face_grad_op(
      const int nelem,
@@ -376,60 +390,6 @@ public:
     const int &npts,
     const double *par_coord,
     double* shape_fcn);
-
-};
-
-// 3D Quad 4
-class Quad3DSCS : public MasterElement
-{
-public:
-
-  Quad3DSCS();
-  virtual ~Quad3DSCS();
-
-  const int * ipNodeMap(int ordinal = 0);
-
-  void determinant(
-    const int nelem,
-    const double *coords,
-    double *areav,
-    double * error );
-
-  void shape_fcn(
-    double *shpfc);
-
-  void shifted_shape_fcn(
-    double *shpfc);
-
-  double isInElement(
-    const double *elemNodalCoord,
-    const double *pointCoord,
-    double *isoParCoord);
-  
-  void interpolatePoint(
-    const int &nComp,
-    const double *isoParCoord,
-    const double *field,
-    double *result);
-
-  void general_shape_fcn(
-    const int numIp,
-    const double *isoParCoord,
-    double *shpfc);
-
-  void general_normal(
-    const double *isoParCoord,
-    const double *coords,
-    double *normal);
-
-  void non_unit_face_normal(
-    const double * par_coord,
-    const double * elem_nodal_coor,
-    double * normal_vector );
-  
-  double parametric_distance(const std::vector<double> &x);
-
-  const double elemThickness_;
 };
 
 // 3D Tri 3

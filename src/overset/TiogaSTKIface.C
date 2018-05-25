@@ -12,6 +12,7 @@
 
 #include "overset/OversetManagerTIOGA.h"
 #include "overset/OversetInfo.h"
+#include <utils/StkHelpers.h>
 
 #include "NaluEnv.h"
 #include "Realm.h"
@@ -24,6 +25,7 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 #include "tioga.h"
 
@@ -61,10 +63,10 @@ TiogaSTKIface::load(const YAML::Node& node)
       << "TIOGA: Using coordinates field: " << coords_name << std::endl;
 }
 
-void TiogaSTKIface::setup()
+void TiogaSTKIface::setup(stk::mesh::PartVector& bcPartVec)
 {
   for (auto& tb: blocks_) {
-    tb->setup();
+    tb->setup(bcPartVec);
   }
 
   // Initialize the inactive part
@@ -194,6 +196,8 @@ void TiogaSTKIface::update_ghosting()
     bulk_.change_ghosting(
       *(oversetManager_.oversetGhosting_), elemsToGhost_);
     bulk_.modification_end();
+
+    sierra::nalu::populate_ghost_comm_procs(bulk_, *oversetManager_.oversetGhosting_, oversetManager_.ghostCommProcs_);
 
 #if 1
     sierra::nalu::NaluEnv::self().naluOutputP0()
@@ -445,7 +449,7 @@ TiogaSTKIface::get_receptor_info()
   std::vector<unsigned long> allEntities(nTotalEntities);
 
   offsets[0] = 0;
-  for (int i=0; i <= nproc; ++i) {
+  for (int i=1; i <= nproc; ++i) {
     offsets[i] = offsets[i-1] + nbPerProc[i-1];
   }
 

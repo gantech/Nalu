@@ -78,7 +78,7 @@ class PeriodicManager {
 
   double get_search_time();
 
- private:
+// private:
 
   void augment_periodic_selector_pairs();
 
@@ -128,10 +128,15 @@ class PeriodicManager {
   int maxErrorCount_;
   const double amplificationFactor_;
 
+ public:
   // the data structures to hold master/slave information
   typedef std::pair<stk::mesh::Entity, stk::mesh::Entity> EntityPair;
   typedef std::pair<stk::mesh::Selector, stk::mesh::Selector> SelectorPair;
   typedef std::vector<std::pair<theEntityKey,theEntityKey> > SearchKeyVector;
+
+  std::vector<int> ghostCommProcs_;
+
+ private:
 
   // vector of master:slave selector pairs
   std::vector<SelectorPair> periodicSelectorPairs_;

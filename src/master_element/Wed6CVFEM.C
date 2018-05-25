@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------*/
-/*  Copyright 2014 National Renewable Energy Laboratory.                  */
+/*  Copyright 2014 Sandia Corporation.                                    */
 /*  This software is released under the license detailed                  */
 /*  in the file, LICENSE, which is located in the top-level Nalu          */
 /*  directory structure                                                   */
@@ -9,15 +9,17 @@
 #include "master_element/MasterElementFunctions.h"
 #include "master_element/Hex8GeometryFunctions.h"
 #include "FORTRAN_Proto.h"
+#include "NaluEnv.h"
 
 namespace sierra {
 namespace nalu {
 
 //-------- wed_deriv -------------------------------------------------------
+template <typename DerivType>
 void wed_deriv(
   const int npts,
   const double* intgLoc,
-  SharedMemView<DoubleType***>& deriv)
+  DerivType& deriv)
 {
   for (int  j = 0; j < npts; ++j) {
     int k  = j*3;
@@ -70,14 +72,15 @@ WedSCV::WedSCV()
 
   // standard integration location
   intgLoc_.resize(18);
-  const double seven12th = 7.0/12.0;
-  const double five24th = 5.0/24.0;
-  intgLoc_[0]  = five24th;  intgLoc_[1]  = five24th;  intgLoc_[2]  = -0.5; // vol 0
-  intgLoc_[3]  = seven12th; intgLoc_[4]  = five24th;  intgLoc_[5]  = -0.5; // vol 1
-  intgLoc_[6]  = five24th;  intgLoc_[7]  = seven12th; intgLoc_[8]  = -0.5; // vol 2
-  intgLoc_[9]  = five24th;  intgLoc_[10] = five24th;  intgLoc_[11] = 0.5;  // vol 3
-  intgLoc_[12] = seven12th; intgLoc_[13] = five24th;  intgLoc_[14] = 0.5;  // vol 4
-  intgLoc_[15] = five24th;  intgLoc_[16] = seven12th; intgLoc_[17] = 0.5;  // vol 5
+
+  const double eleven18ths = 11.0/18.0;
+  const double seven36ths = 7.0/36.0;
+  intgLoc_[0]  = seven36ths;  intgLoc_[1]  = seven36ths;  intgLoc_[2]  = -0.5; // vol 0
+  intgLoc_[3]  = eleven18ths; intgLoc_[4]  = seven36ths;  intgLoc_[5]  = -0.5; // vol 1
+  intgLoc_[6]  = seven36ths;  intgLoc_[7]  = eleven18ths; intgLoc_[8]  = -0.5; // vol 2
+  intgLoc_[9]  = seven36ths;  intgLoc_[10] = seven36ths;  intgLoc_[11] = 0.5;  // vol 3
+  intgLoc_[12] = eleven18ths; intgLoc_[13] = seven36ths;  intgLoc_[14] = 0.5;  // vol 4
+  intgLoc_[15] = seven36ths;  intgLoc_[16] = eleven18ths; intgLoc_[17] = 0.5;  // vol 5
 
   // shifted
   intgLocShift_.resize(18);
@@ -224,7 +227,19 @@ void WedSCV::grad_op(
   SharedMemView<DoubleType***>& deriv)
 {
   wed_deriv(numIntPoints_, &intgLoc_[0], deriv);
-  generic_grad_op_3d<AlgTraitsWed6>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
+}
+
+//--------------------------------------------------------------------------
+//-------- shifted_grad_op -------------------------------------------------
+//--------------------------------------------------------------------------
+void WedSCV::shifted_grad_op(
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop,
+  SharedMemView<DoubleType***>& deriv)
+{
+  wed_deriv(numIntPoints_, &intgLocShift_[0], deriv);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
 }
 
 //--------------------------------------------------------------------------
@@ -338,8 +353,9 @@ WedSCS::WedSCS()
   // standard integration location
   const double oneSixth = 1.0/6.0;
   const double five12th = 5.0/12.0;
-  const double seven12th = 7.0/12.0;
-  const double five24th = 5.0/24.0;
+  const double eleven18th = 11.0/18.0;
+  const double seven36th = 7.0/36.0;
+
   intgLoc_.resize(27);
   intgLoc_[0]  =  five12th;  intgLoc_[1]  = oneSixth;  intgLoc_[2]  = -0.50; // surf 1    1->2
   intgLoc_[3]  =  five12th;  intgLoc_[4]  = five12th;  intgLoc_[5]  = -0.50; // surf 2    2->3
@@ -347,9 +363,9 @@ WedSCS::WedSCS()
   intgLoc_[9]  =  five12th;  intgLoc_[10] = oneSixth;  intgLoc_[11] =  0.50; // surf 4    4->5
   intgLoc_[12] =  five12th;  intgLoc_[13] = five12th;  intgLoc_[14] =  0.50; // surf 5    5->6
   intgLoc_[15] =  oneSixth;  intgLoc_[16] = five12th;  intgLoc_[17] =  0.50; // surf 6    4->6
-  intgLoc_[18] =  five24th;  intgLoc_[19] = five24th;  intgLoc_[20] =  0.00; // surf 7    1->4
-  intgLoc_[21] =  seven12th; intgLoc_[22] = five24th;  intgLoc_[23] =  0.00; // surf 8    2->5
-  intgLoc_[24] =  five24th;  intgLoc_[25] = seven12th; intgLoc_[26] =  0.00; // surf 9    3->6
+  intgLoc_[18] =  seven36th;  intgLoc_[19] = seven36th;  intgLoc_[20] =  0.00; // surf 7    1->4
+  intgLoc_[21] =  eleven18th; intgLoc_[22] = seven36th;  intgLoc_[23] =  0.00; // surf 8    2->5
+  intgLoc_[24] =  seven36th;  intgLoc_[25] = eleven18th; intgLoc_[26] =  0.00; // surf 9    3->6
 
   // shifted
   intgLocShift_.resize(27);
@@ -377,13 +393,13 @@ WedSCS::WedSCS()
   intgExpFace_[27] = 0.0;       intgExpFace_[28] = 0.25;      intgExpFace_[29] =  0.5; // face 2, surf 1
   intgExpFace_[30] = 0.0;       intgExpFace_[31] = 0.75;      intgExpFace_[32] =  0.5; // face 2, surf 2
   intgExpFace_[33] = 0.0;       intgExpFace_[34] = 0.75;      intgExpFace_[35] = -0.5; // face 2, surf 3
-  intgExpFace_[36] = five24th;  intgExpFace_[37] = five24th;  intgExpFace_[38] = -1.0; // surf 3; nodes 0,2,1
-  intgExpFace_[39] = five24th;  intgExpFace_[40] = seven12th; intgExpFace_[41] = -1.0; // face 3, surf 1
-  intgExpFace_[42] = seven12th; intgExpFace_[43] = five24th;  intgExpFace_[44] = -1.0; // face 3, surf 2
+  intgExpFace_[36] = seven36th;  intgExpFace_[37] = seven36th;  intgExpFace_[38] = -1.0; // surf 3; nodes 0,2,1
+  intgExpFace_[39] = seven36th;  intgExpFace_[40] = eleven18th; intgExpFace_[41] = -1.0; // face 3, surf 1
+  intgExpFace_[42] = eleven18th; intgExpFace_[43] = seven36th;  intgExpFace_[44] = -1.0; // face 3, surf 2
   intgExpFace_[45] = 0.0;       intgExpFace_[46] = 0.0;       intgExpFace_[47] =  0.0; // (blank)
-  intgExpFace_[48] = five24th;  intgExpFace_[49] = five24th;  intgExpFace_[50] = 1.0;  // surf 4; nodes 3,4,5
-  intgExpFace_[51] = seven12th; intgExpFace_[52] = five24th;  intgExpFace_[53] = 1.0;  // face 4, surf 1
-  intgExpFace_[54] = five24th;  intgExpFace_[55] = seven12th; intgExpFace_[56] = 1.0;  // face 4, surf 2
+  intgExpFace_[48] = seven36th;  intgExpFace_[49] = seven36th;  intgExpFace_[50] = 1.0;  // surf 4; nodes 3,4,5
+  intgExpFace_[51] = eleven18th; intgExpFace_[52] = seven36th;  intgExpFace_[53] = 1.0;  // face 4, surf 1
+  intgExpFace_[54] = seven36th;  intgExpFace_[55] = eleven18th; intgExpFace_[56] = 1.0;  // face 4, surf 2
   intgExpFace_[57] = 0.0;       intgExpFace_[58] = 0.0;       intgExpFace_[59] = 0.0;  // (blank)
 
   // boundary integration point ip node mapping (ip on an ordinal to local node number)
@@ -592,7 +608,7 @@ void WedSCS::grad_op(
 {
   wed_deriv(numIntPoints_, &intgLoc_[0], deriv);
 
-  generic_grad_op_3d<AlgTraitsWed6>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
 }
 
 void WedSCS::shifted_grad_op(
@@ -602,7 +618,7 @@ void WedSCS::shifted_grad_op(
 {
   wed_deriv(numIntPoints_, &intgLocShift_[0], deriv);
 
-  generic_grad_op_3d<AlgTraitsWed6>(deriv, coords, gradop);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
   //wed_grad_op(deriv, coords, gradop);
 }
 
@@ -629,7 +645,7 @@ void WedSCS::grad_op(
       coords, gradop, det_j, error, &lerr );
 
   if ( lerr )
-    std::cout << "sorry, negative WedSCS volume.." << std::endl;
+    NaluEnv::self().naluOutput() << "sorry, negative WedSCS volume.." << std::endl;
 }
 
 //--------------------------------------------------------------------------
@@ -655,7 +671,7 @@ void WedSCS::shifted_grad_op(
       coords, gradop, det_j, error, &lerr );
 
   if ( lerr )
-    std::cout << "sorry, negative WedSCS volume.." << std::endl;
+    NaluEnv::self().naluOutput() << "sorry, negative WedSCS volume.." << std::endl;
 }
 
 //--------------------------------------------------------------------------
@@ -728,7 +744,7 @@ WedSCS::face_grad_op(
 
     for ( int k=0; k<npf; ++k ) {
 
-      const int row = 12*face_ordinal +k*ndim;
+      const int row = 12*face_ordinal + k*ndim;
       wedge_derivative(nface, &intgExpFace_[row], dpsi);
 
       SIERRA_FORTRAN(wed_gradient_operator) (
@@ -739,15 +755,93 @@ WedSCS::face_grad_op(
           &coords[18*n], &gradop[k*nelem*18+n*18], &det_j[npf*n+k], error, &lerr );
 
       if ( lerr )
-        std::cout << "problem with EwedSCS::face_grad" << std::endl;
+        NaluEnv::self().naluOutput() << "problem with EwedSCS::face_grad" << std::endl;
 
     }
   }
 }
 
+void WedSCS::face_grad_op_tri(const int face_ordinal, const bool shifted, 
+                              SharedMemView<DoubleType**>& coords, TriFaceGradType& gradop)
+{
+  using tri_traits = AlgTraitsTri3Wed6;
+  using quad_traits = AlgTraitsQuad4Wed6;
+
+  constexpr int derivSize = tri_traits::numFaceIp_ *  tri_traits::nodesPerElement_ * tri_traits::nDim_;
+
+  DoubleType NALU_ALIGN(64) psi[derivSize];
+  TriFaceGradType deriv(psi,tri_traits::numFaceIp_,tri_traits::nodesPerElement_,tri_traits::nDim_);
+
+  int offset;
+  if (shifted)  offset = sideOffset_[face_ordinal];
+  else          offset = (face_ordinal < 3) ? 0 : quad_traits::numFaceIp_ * face_ordinal;
+  wed_deriv(tri_traits::numFaceIp_, &intgExpFace_[tri_traits::nDim_ * offset], deriv);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
+}
+
+void WedSCS::face_grad_op_quad(const int face_ordinal, const bool shifted, 
+                               SharedMemView<DoubleType**>& coords, QuadFaceGradType& gradop)
+{
+  using quad_traits = AlgTraitsQuad4Wed6;
+
+  constexpr int derivSize = quad_traits::numFaceIp_ *  quad_traits::nodesPerElement_ * quad_traits::nDim_;
+  DoubleType NALU_ALIGN(64) psi[derivSize];
+  QuadFaceGradType deriv(psi,quad_traits::numFaceIp_,quad_traits::nodesPerElement_,quad_traits::nDim_);
+
+  int offset;
+  if (shifted)  offset = sideOffset_[face_ordinal];
+  else          offset = (face_ordinal < 3) ? quad_traits::numFaceIp_ * face_ordinal : 0;
+  wed_deriv(quad_traits::numFaceIp_, &intgExpFace_[quad_traits::nDim_ * offset], deriv);
+  generic_grad_op<AlgTraitsWed6>(deriv, coords, gradop);
+}
+
+void WedSCS::face_grad_op(
+  const int face_ordinal,
+  const bool shifted,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  using tri_traits = AlgTraitsTri3Wed6;
+  using quad_traits = AlgTraitsQuad4Wed6;
+
+  constexpr int quad_derivSize = quad_traits::numFaceIp_ *  quad_traits::nodesPerElement_ * quad_traits::nDim_;
+  DoubleType NALU_ALIGN(64) quad_grad_temp[quad_derivSize];
+  QuadFaceGradType quad_gradop(quad_grad_temp,quad_traits::numFaceIp_,quad_traits::nodesPerElement_,quad_traits::nDim_);
+  face_grad_op_quad(face_ordinal, shifted, coords, quad_gradop);
+
+  constexpr int tri_derivSize = tri_traits::numFaceIp_ *  tri_traits::nodesPerElement_ * tri_traits::nDim_;
+  DoubleType NALU_ALIGN(64) tri_grad_temp[tri_derivSize];
+  TriFaceGradType tri_gradop(tri_grad_temp,tri_traits::numFaceIp_,tri_traits::nodesPerElement_,tri_traits::nDim_);
+  face_grad_op_tri(face_ordinal, shifted, coords, tri_gradop);
+
+  const int length = (face_ordinal < 3) ? quad_derivSize : tri_derivSize;
+  DoubleType triMask = (face_ordinal < 3) ? 0 : 1;
+  DoubleType* gradop_ptr = gradop.ptr_on_device();
+  for (int k = 0; k < length; ++k) {
+    gradop_ptr[k] = (1-triMask) * quad_grad_temp[k] + triMask * tri_grad_temp[k];
+  }
+}
+
+void WedSCS::face_grad_op(
+  int face_ordinal,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  constexpr bool shifted = false;
+  face_grad_op(face_ordinal, shifted, coords, gradop);
+}
 //--------------------------------------------------------------------------
 //-------- shifted_face_grad_op --------------------------------------------
 //--------------------------------------------------------------------------
+void WedSCS::shifted_face_grad_op(
+  int face_ordinal,
+  SharedMemView<DoubleType**>& coords,
+  SharedMemView<DoubleType***>& gradop)
+{
+  constexpr bool shifted = true;
+  face_grad_op(face_ordinal, shifted, coords, gradop);
+}
+
 void
 WedSCS::shifted_face_grad_op(
   const int nelem,
@@ -780,7 +874,7 @@ WedSCS::shifted_face_grad_op(
           &coords[18*n], &gradop[k*nelem*18+n*18], &det_j[npf*n+k], error, &lerr );
 
       if ( lerr )
-        std::cout << "problem with EwedSCS::face_grad" << std::endl;
+        NaluEnv::self().naluOutput() << "problem with EwedSCS::face_grad" << std::endl;
 
     }
   }
@@ -1128,7 +1222,7 @@ WedSCS::general_face_grad_op(
       &coords[0], &gradop[0], &det_j[0], error, &lerr );
 
   if ( lerr )
-    std::cout << "problem with EwedSCS::general_face_grad" << std::endl;
+    NaluEnv::self().naluOutput() << "problem with EwedSCS::general_face_grad" << std::endl;
 
 }
 

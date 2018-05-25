@@ -74,11 +74,17 @@ public:
   bool primitive_uses_limiter(const std::string&) const;
 
   bool get_shifted_grad_op(const std::string&) const;
+  
+  bool get_skew_symmetric(const std::string&) const;
 
   std::vector<double> get_gravity_vector(const unsigned nDim) const;
  
   double get_turb_model_constant(
     TurbulenceModelConstant turbModelEnum) const;
+  
+  bool get_noc_usage(const std::string &dofName) const;
+
+  bool has_set_boussinesq_time_scale();
 
   double hybridDefault_;
   double alphaDefault_;
@@ -89,6 +95,7 @@ public:
   double turbPrDefault_;
   bool nocDefault_;
   bool shiftedGradOpDefault_;
+  bool skewSymmetricDefault_;
   std::string tanhFormDefault_;
   double tanhTransDefault_;
   double tanhWidthDefault_;
@@ -133,12 +140,14 @@ public:
   double inputVariablesPeriodicTime_;
   bool consistentMMPngDefault_;
   bool useConsolidatedSolverAlg_;
+  bool useConsolidatedBcSolverAlg_;
   bool eigenvaluePerturb_;
   double eigenvaluePerturbDelta_;
   int eigenvaluePerturbBiasTowards_;
   double eigenvaluePerturbTurbKe_;
   double earthAngularVelocity_;
   double latitude_;
+  double raBoussinesqTimeScale_;
 
   // mdot post processing
   double mdotAlgAccumulation_;
@@ -164,6 +173,7 @@ public:
   std::map<std::string, double> tanhTransMap_;
   std::map<std::string, double> tanhWidthMap_;
   std::map<std::string, bool> consistentMassMatrixPngMap_;
+  std::map<std::string, bool> skewSymmetricMap_;
 
   // property related
   std::map<std::string, double> lamScMap_;

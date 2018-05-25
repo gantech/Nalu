@@ -134,6 +134,7 @@ realms:
       non_conformal_user_data:
         expand_box_percentage: 5.0 
         search_tolerance: 0.01 
+        activate_dynamic_search_algorithm: yes
 
     - non_conformal_boundary_condition: bc_out_in
       current_target_name: [surface_88, surface_99, surface_1000]
@@ -141,11 +142,13 @@ realms:
       non_conformal_user_data:
         expand_box_percentage: 5.0 
         search_tolerance: 0.01 
+        activate_dynamic_search_algorithm: yes
 
     solution_options:
       name: myOptions
 
       use_consolidated_solver_algorithm: yes
+      use_consolidated_face_elem_bc_algorithm: yes
 
       mesh_motion:
 
@@ -172,14 +175,6 @@ realms:
           compute_centroid: yes
 
       options:
-
-        - limiter:
-            pressure: no
-            velocity: no
-
-        - hybrid_factor:
-            mixture_fraction: 0.0
-            velocity: 0.0
 
         - element_source_terms:
             momentum: [lumped_momentum_time_derivative, advection_diffusion, NSO_2ND_KE]

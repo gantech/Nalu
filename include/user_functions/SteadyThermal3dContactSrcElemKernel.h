@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------*/
-/*  Copyright 2014 National Renewable Energy Laboratory.                  */
+/*  Copyright 2014 Sandia Corporation.                                    */
 /*  This software is released under the license detailed                  */
 /*  in the file, LICENSE, which is located in the top-level Nalu          */
 /*  directory structure                                                   */
@@ -8,7 +8,7 @@
 #ifndef STEADYTHERMAL3DCONTACTSRCELEMKERNEL_H
 #define STEADYTHERMAL3DCONTACTSRCELEMKERNEL_H
 
-#include "Kernel.h"
+#include "kernel/Kernel.h"
 #include "FieldTypeDef.h"
 
 #include <stk_mesh/base/BulkData.hpp>

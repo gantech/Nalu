@@ -9,6 +9,7 @@
 #include <NaluParsing.h>
 #include <Realm.h>
 #include <master_element/MasterElement.h>
+#include <utils/StkHelpers.h>
 
 // overset
 #include <overset/OversetInfo.h>
@@ -65,6 +66,18 @@ OversetManagerSTK::OversetManagerSTK(
 //--------------------------------------------------------------------------
 OversetManagerSTK::~OversetManagerSTK()
 {}
+
+void
+OversetManagerSTK::setup()
+{
+  // Add all overset BC parts to the BC vector so that check missing BCs can
+  // ignore these parts
+  std::string targetName(oversetUserData_.oversetSurface_);
+  stk::mesh::Part* part = metaData_->get_part(targetName);
+  if (nullptr == part)
+    throw std::runtime_error("OversetManagerSTK:: Invalid overset surface provided");
+  realm_.bcPartVec_.push_back(part);
+}
 
 //--------------------------------------------------------------------------
 //-------- initialize ------------------------------------------------------
@@ -825,6 +838,8 @@ OversetManagerSTK::manage_ghosting()
     bulkData_->modification_begin();
     bulkData_->change_ghosting( *oversetGhosting_, elemsToGhost_);
     bulkData_->modification_end();
+
+    populate_ghost_comm_procs(*bulkData_, *oversetGhosting_, ghostCommProcs_);
   }
   else {
     NaluEnv::self().naluOutputP0() << "Overset alg will NOT ghost entities: " << std::endl;

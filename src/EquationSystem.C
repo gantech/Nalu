@@ -20,7 +20,7 @@
 #include <LinearSystem.h>
 #include <ConstantAuxFunction.h>
 #include <Enums.h>
-#include <KernelBuilderLog.h>
+#include <kernel/KernelBuilderLog.h>
 
 // overset
 #include <overset/AssembleOversetSolverConstraintAlgorithm.h>
@@ -429,27 +429,6 @@ EquationSystem::evaluate_properties()
 }
 
 //--------------------------------------------------------------------------
-//-------- create_peclet_function ------------------------------------------
-//--------------------------------------------------------------------------
-PecletFunction *
-EquationSystem::create_peclet_function(
-  const std::string dofName)
-{
-  PecletFunction *pecletFunction = NULL;
-  if ( "classic" == realm_.get_tanh_functional_form(dofName) ) { 
-    const double hybridFactor = realm_.get_hybrid_factor(dofName);
-    const double A = 5.0;
-    pecletFunction = new ClassicPecletFunction(A, hybridFactor);
-  }
-  else {
-    const double c1 = realm_.get_tanh_trans(dofName);
-    const double c2 = realm_.get_tanh_width(dofName);
-    pecletFunction = new TanhFunction(c1, c2);
-  }
-  return pecletFunction;
-}
-
-//--------------------------------------------------------------------------
 void
 EquationSystem::report_invalid_supp_alg_names()
 {
@@ -510,7 +489,6 @@ EquationSystem::supp_alg_is_requested(std::vector<std::string> names)
   }
   return found;
 }
-
 
 bool
 EquationSystem::nodal_src_is_requested()

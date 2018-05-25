@@ -38,6 +38,8 @@ class MasterElement;
 class PyrSCV : public MasterElement
 {
 public:
+  using AlgTraits = AlgTraitsPyr5;
+
 
   PyrSCV();
   virtual ~PyrSCV();
@@ -49,6 +51,11 @@ public:
     SharedMemView<DoubleType*>& vol);
 
   void grad_op(
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop,
+    SharedMemView<DoubleType***>& deriv);
+
+  void shifted_grad_op(
     SharedMemView<DoubleType**>& coords,
     SharedMemView<DoubleType***>& gradop,
     SharedMemView<DoubleType***>& deriv);
@@ -75,6 +82,7 @@ public:
 class PyrSCS : public MasterElement
 {
 public:
+  using AlgTraits = AlgTraitsPyr5;
 
   PyrSCS();
   virtual ~PyrSCS();
@@ -147,6 +155,12 @@ public:
     const double *par_coord, 
     double* shape_fcn);
 
+  void
+  general_shape_fcn(const int numIp, const double* isoParCoord, double* shpfc)
+  {
+    pyr_shape_fcn(numIp, isoParCoord, shpfc);
+  }
+
   void sidePcoords_to_elemPcoords(
     const int & side_ordinal,
     const int & npoints,
@@ -167,6 +181,11 @@ public:
     double *det_j,
     double *error);
 
+  void face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
+
   void shifted_face_grad_op(
     const int nelem,
     const int face_ordinal,
@@ -174,6 +193,11 @@ public:
     double *gradop,
     double *det_j,
     double * error );
+
+  void shifted_face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
 
   void general_face_grad_op(
     const int face_ordinal,
@@ -197,6 +221,14 @@ public:
     const double *isoParCoord,
     const double *field,
     double *result);
+
+private:
+  using QuadFaceGradType = SharedMemView<DoubleType***>;
+  using TriFaceGradType = SharedMemView<DoubleType***>;
+
+  void face_grad_op(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, QuadFaceGradType& gradop);
+  void face_grad_op_quad(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, QuadFaceGradType& gradop);
+  void face_grad_op_tri(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, TriFaceGradType& gradop);
 };
 
 } // namespace nalu

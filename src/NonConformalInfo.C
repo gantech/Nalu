@@ -78,6 +78,7 @@ NonConformalInfo::NonConformalInfo(
    const std::string &searchMethodName,
    const bool clipIsoParametricCoords,
    const double searchTolerance,
+   const bool   dynamicSearchTolAlg,
    const std::string debugName)
   : realm_(realm ),
     name_(debugName),
@@ -87,6 +88,7 @@ NonConformalInfo::NonConformalInfo(
     searchMethod_(stk::search::BOOST_RTREE),
     clipIsoParametricCoords_(clipIsoParametricCoords),
     searchTolerance_(searchTolerance),
+    dynamicSearchTolAlg_(dynamicSearchTolAlg),
     meshMotion_(realm_.has_mesh_motion()),
     canReuse_(false)
 {
@@ -130,7 +132,7 @@ NonConformalInfo::initialize()
 {
 
   // clear some of the search info
-  boundingPointVec_.clear();
+  boundingSphereVec_.clear();
   boundingFaceElementBoxVec_.clear();
   searchKeyPair_.clear();
 
@@ -211,7 +213,7 @@ NonConformalInfo::construct_dgInfo()
       std::vector<DgInfo *> faceDgInfoVec(numScsBip);
       for ( int ip = 0; ip < numScsBip; ++ip ) { 
         DgInfo *dgInfo = new DgInfo(NaluEnv::self().parallel_rank(), globalFaceId, localGaussPointId++, ip, 
-                                    face, element, currentFaceOrdinal, meFC, meSCS, currentElemTopo, nDim); 
+                                    face, element, currentFaceOrdinal, meFC, meSCS, currentElemTopo, nDim, searchTolerance_); 
         faceDgInfoVec[ip] = dgInfo;
       }
       
@@ -316,6 +318,9 @@ NonConformalInfo::construct_bounding_points()
       
       DgInfo *dgInfo = theVec[k];
 
+      // extract point radius; set to small if dynamic alg is not activated
+      const double pointRadius = dynamicSearchTolAlg_ ? dgInfo->nearestDistance_*dgInfo->nearestDistanceSafety_ : 1.0e-16;
+      
       // local and current ip
       const uint64_t localIp  = dgInfo->localGaussPointId_; 
       const int currentFaceIp = dgInfo->currentGaussPointId_;
@@ -349,11 +354,77 @@ NonConformalInfo::construct_bounding_points()
       // setup ident for this point; use local integration point id
       stk::search::IdentProc<uint64_t,int> theIdent(localIp, NaluEnv::self().parallel_rank());
       
-      // create the bounding point and push back
-      boundingPoint thePt(currentIpCoords, theIdent);
-      boundingPointVec_.push_back(thePt);
+      // create the bounding sphere and push back
+      boundingSphere theSphere(Sphere(currentIpCoords, pointRadius), theIdent);
+      boundingSphereVec_.push_back(theSphere);
     } 
   }
+}
+
+void
+NonConformalInfo::delete_range_points_found(std::vector<boundingSphere>                  &SphereVec,
+                                            const std::vector<std::pair<theKey, theKey>> &searchKeyPair) const {
+
+  struct compare {
+    bool operator()(const boundingSphere &a, const theKey  &b) const {return a.second < b;}   
+    bool operator()(const theKey  &a, const boundingSphere &b) const {return a < b.second;}   
+    bool operator()(const boundingSphere &a, const boundingSphere &b) const {return a.second.id() < b.second.id();}   
+  }; 
+  if (!std::is_sorted(SphereVec.begin(), SphereVec.end(), compare()))
+     std::sort (SphereVec.begin(), SphereVec.end(), compare());
+
+  std::vector<theKey> keys_found;
+  keys_found.reserve(searchKeyPair.size());
+  for (const auto &ii : searchKeyPair) {
+    keys_found.push_back(ii.first);
+  }
+  {
+    std::sort(keys_found.begin(), keys_found.end());
+    const auto it = std::unique(keys_found.begin(), keys_found.end());
+    keys_found.resize(it-keys_found.begin());
+  }
+  std::vector<boundingSphere> difference(SphereVec.size());
+  {
+    const auto it =
+      std::set_difference(
+        SphereVec.begin(),  SphereVec.end(),
+        keys_found.begin(), keys_found.end(),
+        difference.begin(), compare());
+    difference.resize(it-difference.begin());
+  }
+  swap(difference, SphereVec);
+}
+
+void
+NonConformalInfo::repeat_search_if_needed(const std::vector<boundingSphere>      &boundingSphereVec,
+                                          std::vector<std::pair<theKey, theKey>> &searchKeyPair) const {
+  unsigned num_iterations = 0;
+
+  std::vector<boundingSphere> SphereVec(boundingSphereVec);
+  delete_range_points_found(SphereVec,searchKeyPair);
+
+  int any_not_empty, not_empty = !SphereVec.empty();
+  stk::all_reduce_sum(NaluEnv::self().parallel_comm(), &not_empty, &any_not_empty, 1);
+
+  while (any_not_empty) {
+    for (auto &ii : SphereVec) ii.first.set_radius(2*ii.first.radius());
+    std::vector<std::pair<theKey, theKey>> KeyPair;
+    stk::search::coarse_search(SphereVec, boundingFaceElementBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), KeyPair);
+
+    searchKeyPair.reserve(searchKeyPair.size() + KeyPair.size()); 
+    searchKeyPair.insert(searchKeyPair.end(), KeyPair.begin(), KeyPair.end());
+
+    delete_range_points_found(SphereVec,searchKeyPair);
+    not_empty = !SphereVec.empty();
+    stk::all_reduce_sum(NaluEnv::self().parallel_comm(), &not_empty, &any_not_empty, 1);
+    ++num_iterations;
+
+    if (10<num_iterations) {
+      NaluEnv::self().naluOutputP0() << "NonConformalInfo::repeat_search_if_needed issue with " << name_ << std::endl; 
+      NaluEnv::self().naluOutputP0() << "Increased search tolerance 10 times and still failed to find match." << std::endl; 
+      throw std::runtime_error("Could be an internal logic error. Try turning off dynamic search tolerance algorithm...");
+    }
+  } 
 }
 
 //--------------------------------------------------------------------------
@@ -366,7 +437,9 @@ NonConformalInfo::determine_elems_to_ghost()
   stk::mesh::MetaData & meta_data = realm_.meta_data();
 
   // perform the coarse search
-  stk::search::coarse_search(boundingPointVec_, boundingFaceElementBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), searchKeyPair_);
+  stk::search::coarse_search(boundingSphereVec_, boundingFaceElementBoxVec_, searchMethod_, NaluEnv::self().parallel_comm(), searchKeyPair_);
+    
+  if (dynamicSearchTolAlg_) repeat_search_if_needed(boundingSphereVec_, searchKeyPair_);
 
   // sort based on local gauss point
   std::sort (searchKeyPair_.begin(), searchKeyPair_.end(), sortIntLowHigh());
@@ -409,6 +482,9 @@ NonConformalInfo::complete_search()
   stk::mesh::BulkData & bulk_data = realm_.bulk_data();
   const int nDim = meta_data.spatial_dimension();
 
+  // dynamic algorithm requires normal distance between point and ip
+  double bestElemIpCoords[3];
+
   // fields
   VectorFieldType *coordinates = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
 
@@ -421,10 +497,14 @@ NonConformalInfo::complete_search()
   for( ii=dgInfoVec_.begin(); ii!=dgInfoVec_.end(); ++ii ) {
     std::vector<DgInfo *> &theVec = (*ii);
     for ( size_t k = 0; k < theVec.size(); ++k ) {
-      
+        
       DgInfo *dgInfo = theVec[k];
       const uint64_t localGaussPointId  = dgInfo->localGaussPointId_; 
 
+      // set initial nearestDistance and save off nearest distance under dgInfo
+      double nearestDistance = std::numeric_limits<double>::max();
+      const double nearestDistanceSaved = dgInfo->nearestDistance_;
+        
       std::pair <std::vector<std::pair<theKey, theKey> >::const_iterator, std::vector<std::pair<theKey, theKey> >::const_iterator > 
         p2 = std::equal_range(searchKeyPair_.begin(), searchKeyPair_.end(), localGaussPointId, compareGaussPoint());
 
@@ -437,10 +517,10 @@ NonConformalInfo::complete_search()
           const uint64_t theBox = jj->second.id();
           const unsigned theRank = NaluEnv::self().parallel_rank();
           const unsigned pt_proc = jj->first.proc();
-          
+
           // check if I own the point...
           if ( theRank == pt_proc ) {
-            
+
             // yes, I own the point... However, what about the face element? Who owns that?
 
             // proceed as required; all elements should have already been ghosted via the coarse search
@@ -482,19 +562,41 @@ NonConformalInfo::complete_search()
             MasterElement *meSCS = sierra::nalu::MasterElementRepo::get_surface_master_element(theOpposingElementTopo);
             
             // possible reuse            
-            dgInfo->allOpposingFaceIds_.push_back(theBox);
+            dgInfo->allOpposingFaceIds_.push_back(bulk_data.identifier(opposingFace));
             
             // find distance between true current gauss point coords (the point) and the candidate bounding box
-            const double nearestDistance = meFC->isInElement(&theElementCoords[0],
+            const double nearDistance = meFC->isInElement(&theElementCoords[0],
                                                              &(currentGaussPointCoords[0]),
                                                              &(opposingIsoParCoords[0]));
             
             // check is this is the best candidate
-            if ( nearestDistance < dgInfo->bestX_ ) {
+            if ( nearDistance < dgInfo->bestX_ ) {
               // save the opposing face element and master element
               dgInfo->opposingFace_ = opposingFace;
               dgInfo->meFCOpposing_ = meFC;
              
+              if ( dynamicSearchTolAlg_ ) {
+                // find the projected normal distance between point and centroid; all we need is an approximation
+                meFC->interpolatePoint(nDim, &opposingIsoParCoords[0], &theElementCoords[0], &bestElemIpCoords[0]);
+                double theDistance = 0.0;
+                for ( int j = 0; j < nDim; ++j ) {
+                  double dxj = currentGaussPointCoords[j] - bestElemIpCoords[j];
+                  theDistance += dxj*dxj;
+                }
+                theDistance = std::sqrt(theDistance);
+                nearestDistance = std::min(nearestDistance,theDistance);
+                  
+                // If the nearest distance between the surfaces at this point is smaller then the current
+                // distance can be reduced a bit.  Otherwise make sure the current distance is increased as needed.
+                if (nearestDistance < dgInfo->nearestDistance_) {
+                  const double relax = 0.8;
+                  dgInfo->nearestDistance_ = relax*nearestDistanceSaved + (1.0-relax)*nearestDistance;
+                }
+                else {
+                  dgInfo->nearestDistance_ = nearestDistance;
+                }
+              }
+              
               // save off ordinal for opposing face
               const stk::mesh::ConnectivityOrdinal* face_elem_ords = bulk_data.begin_element_ordinals(opposingFace);
               dgInfo->opposingFaceOrdinal_ = face_elem_ords[0];
@@ -504,7 +606,7 @@ NonConformalInfo::complete_search()
               dgInfo->meSCSOpposing_ = meSCS;
               dgInfo->opposingElementTopo_ = theOpposingElementTopo;
               dgInfo->opposingIsoParCoords_ = opposingIsoParCoords;
-              dgInfo->bestX_ = nearestDistance;
+              dgInfo->bestX_ = nearDistance;
               dgInfo->opposingFaceIsGhosted_ = opposingFaceIsGhosted;
             }
           }
@@ -528,7 +630,12 @@ NonConformalInfo::complete_search()
     throw std::runtime_error("Try to adjust the search tolerance and re-submit...");
   }
 
-  // check for reuse (debug now)
+  // check for reuse and also provide diagnostics on sizes for opposing surface set
+  size_t totalOpposingFaceSize = 0;
+  size_t totalDgInfoSize = 0;
+  size_t maxOpposingSize = 0;
+  size_t minOpposingSize = 1e6;
+    
   size_t numberOfFacesMissing = 0;
   for( size_t iv = 0; iv < dgInfoVec_.size(); ++iv ) {
     std::vector<DgInfo *> &theVec = dgInfoVec_[iv];
@@ -537,6 +644,13 @@ NonConformalInfo::complete_search()
       // extract the info object; new and old
       DgInfo *dgInfo = theVec[k];
       
+      // counts
+      size_t opposingCount = dgInfo->allOpposingFaceIds_.size();
+      totalDgInfoSize++;
+      totalOpposingFaceSize += opposingCount;
+      maxOpposingSize = std::max(maxOpposingSize, opposingCount);
+      minOpposingSize = std::min(minOpposingSize, opposingCount);
+        
       // extract the bestX opposing face id
       const size_t bestOpposingId = bulk_data.identifier(dgInfo->opposingFace_);
       
@@ -553,16 +667,27 @@ NonConformalInfo::complete_search()
   }
   
   // global sum
+  NaluEnv::self().naluOutputP0() << "DgInfo size overview for name: " << name_ << std::endl;
   size_t g_numberOfFacesMissing;
   stk::all_reduce_sum(NaluEnv::self().parallel_comm(), &numberOfFacesMissing, &g_numberOfFacesMissing, 1);
   if ( g_numberOfFacesMissing > 0 ) {
-    NaluEnv::self().naluOutputP0() << "Ghosted search entries ARE NOT sufficient for re-use " << std::endl;
+    NaluEnv::self().naluOutputP0() << "  Ghosted search entries ARE NOT sufficient for re-use " << std::endl;
     canReuse_ = false;
   }
   else {
-    NaluEnv::self().naluOutputP0() << "Ghosted search entries ARE sufficient for re-use " << std::endl;
-    canReuse_ = false; // Set the false until ready for primetime
+    NaluEnv::self().naluOutputP0() << "  Ghosted search entries ARE sufficient for re-use " << std::endl;
+    canReuse_ = true;
   }
+    
+ // finally, provide mean opposing face count
+ size_t g_total[2] = {};
+ size_t g_minOpposingSize; size_t g_maxOpposingSize;
+ size_t l_total[2] = {totalDgInfoSize, totalOpposingFaceSize};
+ stk::all_reduce_sum(NaluEnv::self().parallel_comm(), l_total, g_total, 2);
+ stk::all_reduce_min(NaluEnv::self().parallel_comm(), &minOpposingSize, &g_minOpposingSize, 1);
+ stk::all_reduce_max(NaluEnv::self().parallel_comm(), &maxOpposingSize, &g_maxOpposingSize, 1);
+ NaluEnv::self().naluOutputP0() << "  Min/Max/Average opposing face size: " << g_minOpposingSize << "/"
+                                << g_maxOpposingSize << "/" << g_total[1]/g_total[0] << std::endl;
 }
   
 //--------------------------------------------------------------------------
@@ -576,6 +701,9 @@ NonConformalInfo::construct_bounding_boxes()
   stk::mesh::BulkData & bulk_data = realm_.bulk_data();
 
   const int nDim = meta_data.spatial_dimension();
+
+  // specify dynamic tolerance algorithm factor
+  const double dynamicFac = dynamicSearchTolAlg_ ? 0.0 : 1.0;
 
   // fields
   VectorFieldType *coordinates = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
@@ -631,7 +759,7 @@ NonConformalInfo::construct_bounding_boxes()
       for ( int i = 0; i < nDim; ++i ) {
         const double theMin = minCorner[i];
         const double theMax = maxCorner[i];
-        const double increment = expandBoxPercentage_*(theMax - theMin) + searchTolerance_;
+        const double increment = expandBoxPercentage_*(theMax - theMin) + searchTolerance_*dynamicFac;
         minCorner[i] -= increment;
         maxCorner[i] += increment;
       }

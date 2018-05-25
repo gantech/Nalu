@@ -9,6 +9,7 @@
 #include <PeriodicManager.h>
 #include <NaluEnv.h>
 #include <Realm.h>
+#include <utils/StkHelpers.h>
 
 // stk_mesh/base/fem
 #include <stk_mesh/base/BulkData.hpp>
@@ -21,6 +22,7 @@
 
 // stk_util
 #include <stk_util/parallel/ParallelReduce.hpp>
+#include <stk_util/util/SortAndUnique.hpp>
 
 // stk_search
 #include <stk_search/CoarseSearch.hpp>
@@ -551,6 +553,58 @@ PeriodicManager::error_check()
 //--------------------------------------------------------------------------
 //-------- manage_ghosting_object ------------------------------------------
 //--------------------------------------------------------------------------
+void add_range_nodes_to_sharers_of_domain_nodes(stk::mesh::BulkData& bulk_data,
+                                                  const PeriodicManager::SearchKeyVector& searchKeyVector,
+                                                  std::vector<stk::mesh::EntityProc>& sendNodes)
+{
+    stk::CommSparse commSparse(bulk_data.parallel());
+
+    auto packingLambda = [&]() {
+        int theRank = NaluEnv::self().parallel_rank();
+        std::vector<int> sharingProcs;
+        for(size_t i=0; i<searchKeyVector.size(); ++i) {
+            int domainProc = searchKeyVector[i].first.proc();
+            int rangeProc = searchKeyVector[i].second.proc();
+
+            stk::mesh::EntityKey domainKey = searchKeyVector[i].first.id();
+            stk::mesh::Entity domainNode = bulk_data.get_entity(domainKey);
+
+            if ((theRank == domainProc) && bulk_data.bucket(domainNode).shared()) {
+                stk::mesh::EntityId rangeId = searchKeyVector[i].second.id().id();
+                stk::CommBuffer& sbuf = commSparse.send_buffer(rangeProc);
+
+                bulk_data.comm_shared_procs(domainKey, sharingProcs);
+                if (theRank == rangeProc) {
+                    stk::mesh::Entity rangeNode = bulk_data.get_entity(stk::topology::NODE_RANK, rangeId);
+                    for(int p : sharingProcs) {
+                        sendNodes.push_back(stk::mesh::EntityProc(rangeNode, p));
+                    }
+                }
+                else {
+                    for(int p : sharingProcs) {
+                        if (p != theRank && p != rangeProc) {
+                            sbuf.pack(rangeId);
+                            sbuf.pack(p);
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    stk::pack_and_communicate(commSparse, packingLambda);
+
+    stk::unpack_communications(commSparse, [&](int p)
+    {
+        stk::CommBuffer& rbuf = commSparse.recv_buffer(p);
+        stk::mesh::EntityId gid;
+        rbuf.unpack(gid);
+        int proc;
+        rbuf.unpack(proc);
+        sendNodes.push_back(stk::mesh::EntityProc(bulk_data.get_entity(stk::topology::NODE_RANK, gid), proc));
+    });
+}
+
 void
 PeriodicManager::manage_ghosting_object()
 {
@@ -558,6 +612,8 @@ PeriodicManager::manage_ghosting_object()
   unsigned theRank = NaluEnv::self().parallel_rank();
 
   std::vector<stk::mesh::EntityProc> sendNodes;
+  std::vector<stk::mesh::EntityProc> sendElems;
+  std::vector<int> sharingProcs;
   for (size_t i=0, size=searchKeyVector_.size(); i<size; ++i) {
 
     unsigned domainProc = searchKeyVector_[i].first.proc();
@@ -566,12 +622,30 @@ PeriodicManager::manage_ghosting_object()
     if ((theRank != domainProc) && (theRank == rangeProc)) {
       stk::mesh::Entity rangeNode = bulk_data.get_entity(searchKeyVector_[i].second.id());
       sendNodes.push_back(stk::mesh::EntityProc(rangeNode, domainProc));
+
+      if (realm_.hypreIsActive_) {
+        auto* elems = bulk_data.begin_elements(rangeNode);
+        int nelems = bulk_data.num_elements(rangeNode);
+        for (int ie=0; ie<nelems; ie++)
+          if (bulk_data.bucket(elems[ie]).owned())
+            sendElems.push_back(stk::mesh::EntityProc(elems[ie], domainProc));
+      }
     }
     else if ((theRank == domainProc) && (theRank != rangeProc)) {
       stk::mesh::Entity domainNode = bulk_data.get_entity(searchKeyVector_[i].first.id());
       sendNodes.push_back(stk::mesh::EntityProc(domainNode, rangeProc));
+
+      if (realm_.hypreIsActive_) {
+        auto* elems = bulk_data.begin_elements(domainNode);
+        int nelems = bulk_data.num_elements(domainNode);
+        for (int ie=0; ie<nelems; ie++)
+          if (bulk_data.bucket(elems[ie]).owned())
+            sendElems.push_back(stk::mesh::EntityProc(elems[ie], rangeProc));
+      }
     }
   }
+
+  add_range_nodes_to_sharers_of_domain_nodes(bulk_data, searchKeyVector_, sendNodes);
 
   size_t numNodes = sendNodes.size();
   size_t g_numNodes = 0;
@@ -584,7 +658,11 @@ PeriodicManager::manage_ghosting_object()
     else
       bulk_data.destroy_ghosting(*periodicGhosting_);
     bulk_data.change_ghosting(*periodicGhosting_, sendNodes);
+    if (realm_.hypreIsActive_)
+      bulk_data.change_ghosting(*periodicGhosting_, sendElems);
     bulk_data.modification_end();
+
+    populate_ghost_comm_procs(bulk_data, *periodicGhosting_, ghostCommProcs_);
   }
 
   // now populate master slave communicator

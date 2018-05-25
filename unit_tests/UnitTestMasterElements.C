@@ -12,6 +12,7 @@
 
 #include <master_element/MasterElement.h>
 #include <master_element/Quad42DCVFEM.h>
+#include <master_element/TensorOps.h>
 
 #include <memory>
 #include <random>
@@ -30,6 +31,36 @@ double linear_scalar_value(int dim, double a, const double* b, const double* x)
   return (a + b[0] * x[0] + b[1] * x[1] + b[2] * x[2]);
 }
 //-------------------------------------------------------------------------
+struct LinearField
+{
+  LinearField(int in_dim, double in_a, const double* in_b) : dim(in_dim), a(in_a) {
+    b[0] = in_b[0];
+    b[1] = in_b[1];
+    if (dim == 3) b[2] = in_b[2];
+  }
+
+  double operator()(const double* x) { return linear_scalar_value(dim, a, b, x); }
+
+  const int dim;
+  const double a;
+  double b[3];
+};
+
+LinearField make_random_linear_field(int dim, std::mt19937& rng)
+{
+
+  std::uniform_real_distribution<double> coeff(-1.0, 1.0);
+  std::vector<double> coeffs(dim);
+
+  double a = coeff(rng);
+  for (int j = 0; j < dim; ++j) {
+    coeffs[j] = coeff(rng);
+  }
+  return LinearField(dim, a, coeffs.data());
+}
+
+
+//-------------------------------------------------------------------------
 void check_interpolation_at_ips(
   const stk::mesh::Entity* node_rels,
   const VectorFieldType& coordField,
@@ -41,23 +72,17 @@ void check_interpolation_at_ips(
 
   std::mt19937 rng;
   rng.seed(0);
-  std::uniform_real_distribution<double> coeff(-1.0, 1.0);
-  std::vector<double> coeffs(dim);
-
-  double a = coeff(rng);
-  for (int j = 0; j < dim; ++j) {
-    coeffs[j] = coeff(rng);
-  }
+  auto linField = make_random_linear_field(dim,rng);
 
   const auto& intgLoc = me.intgLoc_;
   std::vector<double> polyResult(me.numIntPoints_);
   for (int j = 0; j < me.numIntPoints_; ++j) {
-    polyResult[j] = linear_scalar_value(dim, a, coeffs.data(), &intgLoc[j*dim]);
+    polyResult[j] = linField(&intgLoc[j*dim]);
   }
 
   std::vector<double> ws_field(me.nodesPerElement_);
   for (int j = 0; j < me.nodesPerElement_; ++j) {
-    ws_field[j] = linear_scalar_value(dim, a, coeffs.data(), stk::mesh::field_data(coordField, node_rels[j]));
+    ws_field[j] = linField(stk::mesh::field_data(coordField, node_rels[j]));
   }
 
   std::vector<double> meResult(me.numIntPoints_, 0.0);
@@ -86,18 +111,12 @@ void check_derivatives_at_ips(
 
   std::mt19937 rng;
   rng.seed(0);
-  std::uniform_real_distribution<double> coeff(-1.0, 1.0);
-  std::vector<double> coeffs(dim);
-
-  double a = coeff(rng);
-  for (int j = 0; j < dim; ++j) {
-    coeffs[j] = coeff(rng);
-  }
+  auto linField = make_random_linear_field(dim,rng);
 
   std::vector<double> polyResult(me.numIntPoints_ * dim);
   for (int j = 0; j < me.numIntPoints_; ++j) {
     for (int d = 0; d < dim; ++d) {
-      polyResult[j*dim+d] = coeffs[d];
+      polyResult[j*dim+d] = linField.b[d];
     }
   }
 
@@ -108,7 +127,7 @@ void check_derivatives_at_ips(
     for (int d = 0; d < dim; ++d) {
       ws_coords[j*dim+d] = coords[d];
     }
-    ws_field[j] = linear_scalar_value(dim, a, coeffs.data(), coords);
+    ws_field[j] = linField(coords);
   }
 
   std::vector<double> meResult(me.numIntPoints_ * dim, 0.0);
@@ -161,6 +180,52 @@ void check_scv_shifted_ips_are_nodal(
   for (unsigned j = 0; j < shiftedIps.size(); ++j) {
     EXPECT_NEAR(ws_coords[j], shiftedIps[j], tol);
   }
+}
+//-------------------------------------------------------------------------
+void check_volume_integration(
+  const stk::mesh::Entity* node_rels,
+  const VectorFieldType& coordField,
+  sierra::nalu::MasterElement& meSV)
+{
+  int dim = meSV.nDim_;
+  std::vector<double> ws_coords_mapped(meSV.nodesPerElement_ * dim, 0.0);
+  std::vector<double> ws_coords(meSV.nodesPerElement_ * dim, 0.0);
+
+  std::mt19937 rng;
+  rng.seed(0);
+
+  auto QR = unit_test_utils::random_linear_transformation(dim, 1.0, rng);
+  for (int j = 0; j < meSV.nodesPerElement_; ++j) {
+    const double* coords = stk::mesh::field_data(coordField, node_rels[j]);
+
+    if (dim == 3) {
+      sierra::nalu::matvec33(QR.data(), coords, &ws_coords_mapped[j*dim]);
+    }
+    else {
+      sierra::nalu::matvec22(QR.data(), coords, &ws_coords_mapped[j*dim]);
+    }
+
+    for (int k = 0; k < dim; ++k) {
+      ws_coords[j*dim+k] = coords[k];
+    }
+
+  }
+  const double detQR = (dim == 3) ? sierra::nalu::determinant33(QR.data()) : sierra::nalu::determinant22(QR.data());
+  ASSERT_TRUE(detQR > 1.0e-15);
+
+  double error = 0;
+  std::vector<double> volume_integration_weights(meSV.numIntPoints_);
+  meSV.determinant(1, ws_coords.data(), volume_integration_weights.data(), &error);
+  ASSERT_DOUBLE_EQ(error, 0);
+
+  std::vector<double> skewed_volume_integration_weights(meSV.numIntPoints_);
+  meSV.determinant(1, ws_coords_mapped.data(), skewed_volume_integration_weights.data(), &error);
+  ASSERT_DOUBLE_EQ(error, 0);
+
+  for (int k = 0; k < meSV.numIntPoints_; ++k) {
+    EXPECT_NEAR(detQR*volume_integration_weights[k], skewed_volume_integration_weights[k], tol);
+  }
+
 }
 //-------------------------------------------------------------------------
 void check_exposed_face_shifted_ips_are_nodal(
@@ -316,6 +381,7 @@ void check_particle_interp(
 
   std::mt19937 rng;
   rng.seed(0);
+  auto linField = make_random_linear_field(dim,rng);
 
   // randomly select a point within (boxmin, boxmax)^3 \subset reference element domain
   const double boxmin = 0.125;
@@ -323,7 +389,6 @@ void check_particle_interp(
   std::uniform_real_distribution<double> coeff(boxmin, boxmax);
   std::vector<double> random_pt(dim);
 
-  double const_value = coeff(rng);
   for (int j = 0; j < dim; ++j) {
     random_pt[j] = coeff(rng);
   }
@@ -350,7 +415,7 @@ void check_particle_interp(
       perturbed_coords[d] = coords[d] + coord_perturb(rng);
       ws_coords[d * me.nodesPerElement_ + j] = perturbed_coords[d];
     }
-    ws_field[j] = linear_scalar_value(dim, const_value, coeffs.data(), perturbed_coords.data());
+    ws_field[j] = linField(perturbed_coords.data());
   }
 
   std::vector<double> mePt(dim);
@@ -359,10 +424,81 @@ void check_particle_interp(
 
   double meInterp = 0.0;
   me.interpolatePoint(1, mePt.data(), ws_field.data(), &meInterp);
-  double exactVal = linear_scalar_value(dim, const_value, coeffs.data(), random_pt.data());
+  double exactVal = linField(random_pt.data());
   EXPECT_NEAR(meInterp, exactVal, tol);
 }
 
+/** Check implementation of general_shape_fcn for a given MasterElement
+ *
+ */
+void
+check_general_shape_fcn(
+  const stk::mesh::Entity* node_rels,
+  const VectorFieldType& coordField,
+  sierra::nalu::MasterElement& me)
+{
+  const int dim = me.nDim_;
+
+  std::random_device rd{};
+  std::mt19937 rng{rd()};
+
+  // 1. Generate a random point within the element
+  const double boxmin = 0.125;
+  const double boxmax = 0.25;
+  std::uniform_real_distribution<double> coeff(boxmin, boxmax);
+  std::vector<double> nodal_coords(dim);
+  for (int d = 0; d < dim; d++)
+    nodal_coords[d] = coeff(rng);
+
+  // 2. Extract iso-parametric coordinates for this random point w.r.t element
+
+  // see check_is_in_element for an explanation of the factor
+  bool isHexSCS = dynamic_cast<sierra::nalu::HexSCS*>(&me) != nullptr;
+  bool isQuadSCS = dynamic_cast<sierra::nalu::Quad42DSCS*>(&me) != nullptr;
+  double fac = (isHexSCS || isQuadSCS) ? 2.0 : 1.0;
+  std::vector<double> elem_coords(me.nodesPerElement_ * dim);
+
+  for (int j = 0; j < me.nodesPerElement_; j++) {
+    const double* coords = stk::mesh::field_data(coordField, node_rels[j]);
+    for (int d = 0; d < dim; d++)
+      elem_coords[d * me.nodesPerElement_ + j] = fac * coords[d];
+  }
+
+  std::vector<double> isopar_coords(dim);
+  auto dist = me.isInElement(
+    elem_coords.data(), nodal_coords.data(), isopar_coords.data());
+
+  // Catch any issues with random coordinates before general_shape_fcn check
+  EXPECT_LT(dist, 1.0 + tol);
+
+  //
+  // 3. Finally, check general shape fcn
+  //
+
+  auto linField = make_random_linear_field(dim, rng);
+  double polyResult = linField(nodal_coords.data());
+
+  // The linear field at the nodes of the reference element
+  std::vector<double> elem_field(me.nodesPerElement_);
+  std::vector<double> ws_coord(dim);
+  for (int j = 0; j < me.nodesPerElement_; j++) {
+    const double* coords = stk::mesh::field_data(coordField, node_rels[j]);
+    for (int d = 0; d < dim; d++) {
+      ws_coord[d] = fac * coords[d];
+    }
+    elem_field[j] = linField(ws_coord.data());
+  }
+
+  std::vector<double> gen_shape_fcn(me.nodesPerElement_);
+  me.general_shape_fcn(1, isopar_coords.data(), gen_shape_fcn.data());
+
+  double meResult = 0.0;
+  for (int j = 0; j < me.nodesPerElement_; j++) {
+    meResult += gen_shape_fcn[j] * elem_field[j];
+  }
+
+  EXPECT_NEAR(meResult, polyResult, tol);
+}
 }
 
 class MasterElement : public ::testing::Test
@@ -387,6 +523,11 @@ protected:
     void scv_interpolation(stk::topology topo) {
       choose_topo(topo);
       check_interpolation_at_ips(bulk->begin_nodes(elem), coordinate_field(), *meSV);
+    }
+
+    void volume_integration(stk::topology topo) {
+      choose_topo(topo);
+      check_volume_integration(bulk->begin_nodes(elem), coordinate_field(), *meSV);
     }
 
     void scs_derivative(stk::topology topo) {
@@ -417,6 +558,11 @@ protected:
     void particle_interpolation(stk::topology topo) {
       choose_topo(topo);
       check_particle_interp(bulk->begin_nodes(elem), coordinate_field(), *meSS);
+    }
+
+    void general_shape_fcn(stk::topology topo) {
+      choose_topo(topo);
+      check_general_shape_fcn(bulk->begin_nodes(elem), coordinate_field(), *meSS);
     }
 
     const VectorFieldType& coordinate_field() const {
@@ -462,6 +608,7 @@ protected:
 TEST_F_ALL_TOPOS_NO_PYR(MasterElement, scs_interpolation);
 TEST_F_ALL_TOPOS_NO_PYR(MasterElement, scs_derivative);
 TEST_F_ALL_TOPOS_NO_PYR(MasterElement, scv_interpolation);
+TEST_F_ALL_TOPOS_NO_PYR(MasterElement, volume_integration);
 
 // Pyramid fails since the reference element
 // since the constant Jacobian assumption is violated
@@ -474,3 +621,5 @@ TEST_F_ALL_P1_TOPOS(MasterElement, exposed_face_shifted_ips_are_nodal);
 // works fore everything
 TEST_F_ALL_TOPOS(MasterElement, is_not_in_element);
 TEST_F_ALL_TOPOS(MasterElement, particle_interpolation); // includes an isInElement call
+
+TEST_F_ALL_P1_TOPOS(MasterElement, general_shape_fcn);

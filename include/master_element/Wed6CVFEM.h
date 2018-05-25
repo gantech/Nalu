@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------*/
-/*  Copyright 2014 National Renewable Energy Laboratory.                  */
+/*  Copyright 2014 Sandia Corporation.                                    */
 /*  This software is released under the license detailed                  */
 /*  in the file, LICENSE, which is located in the top-level Nalu          */
 /*  directory structure                                                   */
@@ -27,6 +27,11 @@ public:
     SharedMemView<DoubleType*>& volume);
 
   void grad_op(
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop,
+    SharedMemView<DoubleType***>& deriv);
+
+  void shifted_grad_op(
     SharedMemView<DoubleType**>& coords,
     SharedMemView<DoubleType***>& gradop,
     SharedMemView<DoubleType***>& deriv);
@@ -107,6 +112,11 @@ public:
     double *det_j,
     double * error );
 
+  void face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
+
   void shifted_face_grad_op(
     const int nelem,
     const int face_ordinal,
@@ -114,6 +124,11 @@ public:
     double *gradop,
     double *det_j,
     double * error );
+
+  void shifted_face_grad_op(
+    int face_ordinal,
+    SharedMemView<DoubleType**>& coords,
+    SharedMemView<DoubleType***>& gradop) final;
 
   void gij(
     SharedMemView<DoubleType**>& coords,
@@ -157,6 +172,12 @@ public:
     const double *par_coord,
     double* shape_fcn);
 
+  void
+  general_shape_fcn(const int numIp, const double* isoParCoord, double* shpfc)
+  {
+    wedge_shape_fcn(numIp, isoParCoord, shpfc);
+  }
+
   void general_face_grad_op(
     const int face_ordinal,
     const double *isoParCoord,
@@ -176,6 +197,14 @@ public:
   double parametric_distance( const std::vector<double> &x);
 
   const int* side_node_ordinals(int sideOrdinal) final;
+
+private:
+  using QuadFaceGradType = SharedMemView<DoubleType***>;
+  using TriFaceGradType = SharedMemView<DoubleType***>;
+
+  void face_grad_op(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, TriFaceGradType& gradop);
+  void face_grad_op_tri(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, TriFaceGradType& gradop);
+  void face_grad_op_quad(const int face_ordinal, const bool shifted, SharedMemView<DoubleType**>& coords, QuadFaceGradType& gradop);
 
 };
 
