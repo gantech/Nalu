@@ -632,6 +632,8 @@ LowMachEquationSystem::solve_and_update()
   if ( isInit_ ) {
     timeA = NaluEnv::self().nalu_time();
     continuityEqSys_->compute_projected_nodal_gradient();
+    zero_open_intersect_pressure_gradient();
+    
     continuityEqSys_->computeMdotAlgDriver_->execute();
     continuityEqSys_->correctMdotAlgDriver_->execute();
 
@@ -696,6 +698,7 @@ LowMachEquationSystem::solve_and_update()
 
     // compute pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
+    zero_open_intersect_pressure_gradient();
 
     // compute mdot
     timeA = NaluEnv::self().nalu_time();
@@ -743,6 +746,7 @@ LowMachEquationSystem::post_adapt_work()
 
     // compute new nodal pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
+    zero_open_intersect_pressure_gradient();
     
     // continuity assemble, load_complete and solve
     const bool solveCont = false;
@@ -750,7 +754,8 @@ LowMachEquationSystem::post_adapt_work()
 
       // compute new nodal pressure gradient
       continuityEqSys_->compute_projected_nodal_gradient();
-      
+      zero_open_intersect_pressure_gradient();
+          
       // compute mdot
       continuityEqSys_->computeMdotAlgDriver_->execute();
       
@@ -767,7 +772,8 @@ LowMachEquationSystem::post_adapt_work()
 
     // compute new nodal pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
-      
+    zero_open_intersect_pressure_gradient();      
+
     // correct mdot
     continuityEqSys_->correctMdotAlgDriver_->execute();
 
@@ -785,6 +791,44 @@ LowMachEquationSystem::post_adapt_work()
   }
 
 }
+
+void
+LowMachEquationSystem::zero_open_intersect_pressure_gradient()
+{
+    
+  stk::mesh::MetaData & meta_data = realm_.meta_data();
+  const int nDim = meta_data.spatial_dimension();
+
+  // field that we need
+  VectorFieldType *dpdx = continuityEqSys_->dpdx_;
+
+  auto * eastPart = realm_.meta_data().get_part("east") ;
+  auto * southPart = realm_.meta_data().get_part("south") ;
+  
+  stk::mesh::Selector op_intersect_nodes
+      = (stk::mesh::Selector(*eastPart)  & stk::mesh::Selector(*southPart));
+    
+  stk::mesh::BucketVector const& op_intersect_buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, op_intersect_nodes );
+  
+  // process loop
+  for ( stk::mesh::BucketVector::const_iterator ib = op_intersect_buckets.begin() ;
+        ib != op_intersect_buckets.end() ; ++ib ) {
+    stk::mesh::Bucket & b = **ib ;
+    const stk::mesh::Bucket::size_type length   = b.size();
+    double * dp = stk::mesh::field_data(*dpdx, b);
+    
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      // projection step
+      const size_t offSet = k*nDim;
+      for ( int j = 0; j < 2; ++j )
+          dp[offSet+j] = 0.0;
+      
+    }
+  }
+  
+}
+
 
 //--------------------------------------------------------------------------
 //-------- store_pressure_gradient------------------------------------------

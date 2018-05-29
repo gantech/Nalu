@@ -86,7 +86,8 @@ public:
 
   void project_nodal_velocity();
   void store_pressure_gradient();  
-
+  void zero_open_intersect_pressure_gradient();
+  
   void post_converged_work();
 
   const bool elementContinuityEqs_; /* allow for mixed element/edge for continuity */
