@@ -40,6 +40,7 @@ ComputeMdotEdgeOpenAlgorithm::ComputeMdotEdgeOpenAlgorithm(
   : Algorithm(realm, part),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
+    uDiagInv_(NULL),   
     Gpdx_(NULL),
     coordinates_(NULL),
     pressure_(NULL),
@@ -54,6 +55,7 @@ ComputeMdotEdgeOpenAlgorithm::ComputeMdotEdgeOpenAlgorithm(
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
   else
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv"); 
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
@@ -163,6 +165,8 @@ ComputeMdotEdgeOpenAlgorithm::execute()
         const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
         const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
 
+        const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
+        
         const double pressureL = *stk::mesh::field_data(*pressure_, nodeL );
         const double pressureR = *stk::mesh::field_data(*pressure_, nodeR );
         const double pressureIp = 0.5*(pressureL + pressureR);
@@ -179,14 +183,17 @@ ComputeMdotEdgeOpenAlgorithm::execute()
         // compute geometry
         double axdx = 0.0;
         double asq = 0.0;
+        double uDiagInvFDotN = 0.0;
         for ( int j = 0; j < nDim; ++j ) {
           const double axj = areaVec[faceOffSet+j];
           const double coordIp = 0.5*(coordR[j] + coordL[j]);
           const double dxj = coordR[j]  - coordIp;
+          uDiagInvFDotN += uDiagInvR[j]*axj;
           asq += axj*axj;
           axdx += axj*dxj;
         }
-
+        const double magA = sqrt(asq);
+        uDiagInvFDotN /= magA;
         const double inv_axdx = 1.0/axdx;
         const double rhoBip = densityR;
 
@@ -197,9 +204,9 @@ ComputeMdotEdgeOpenAlgorithm::execute()
           const double coordIp = 0.5*(coordR[j] + coordL[j]);
           const double dxj = coordR[j]  - coordIp;
           const double kxj = axj - asq*inv_axdx*dxj;
-          const double Gjp = GpdxR[j];
-          tmdot += (rhoBip*vrtm[j]+projTimeScale*Gjp)*axj
-            - projTimeScale*kxj*Gjp*nocFac;
+          const double uDiagInvGjp = uDiagInvR[j]*GpdxR[j];
+          tmdot += (rhoBip*vrtm[j]+uDiagInvFDotN*GpdxR[j])*axj;
+          // NON-ORTH CORRECTION IS MISSING
         }
         // scatter to mdot and accumulate
         mdot[ip] = tmdot;

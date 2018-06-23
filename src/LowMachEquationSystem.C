@@ -632,7 +632,6 @@ LowMachEquationSystem::solve_and_update()
   if ( isInit_ ) {
     timeA = NaluEnv::self().nalu_time();
     continuityEqSys_->compute_projected_nodal_gradient();
-    zero_open_intersect_pressure_gradient();
     
     continuityEqSys_->computeMdotAlgDriver_->execute();
     continuityEqSys_->correctMdotAlgDriver_->execute();
@@ -657,6 +656,11 @@ LowMachEquationSystem::solve_and_update()
     // momentum assemble, load_complete and solve
     momentumEqSys_->assemble_and_solve(momentumEqSys_->uTmp_);
 
+    const AlgorithmType algType = INTERIOR;
+    std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
+        = momentumEqSys_->solverAlgDriver_->solverAlgMap_.find(algType);
+    momentumEqSys_->linsys_->getDiagonalInvAsField(momentumEqSys_->uDiagInv_, itsi->second->partVec_, 0, nDim);
+    
     // update all of velocity
     timeA = NaluEnv::self().nalu_time();
     field_axpby(
@@ -698,7 +702,6 @@ LowMachEquationSystem::solve_and_update()
 
     // compute pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
-    zero_open_intersect_pressure_gradient();
 
     // compute mdot
     timeA = NaluEnv::self().nalu_time();
@@ -746,7 +749,6 @@ LowMachEquationSystem::post_adapt_work()
 
     // compute new nodal pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
-    zero_open_intersect_pressure_gradient();
     
     // continuity assemble, load_complete and solve
     const bool solveCont = false;
@@ -754,7 +756,6 @@ LowMachEquationSystem::post_adapt_work()
 
       // compute new nodal pressure gradient
       continuityEqSys_->compute_projected_nodal_gradient();
-      zero_open_intersect_pressure_gradient();
           
       // compute mdot
       continuityEqSys_->computeMdotAlgDriver_->execute();
@@ -772,7 +773,6 @@ LowMachEquationSystem::post_adapt_work()
 
     // compute new nodal pressure gradient
     continuityEqSys_->compute_projected_nodal_gradient();
-    zero_open_intersect_pressure_gradient();      
 
     // correct mdot
     continuityEqSys_->correctMdotAlgDriver_->execute();
@@ -791,44 +791,6 @@ LowMachEquationSystem::post_adapt_work()
   }
 
 }
-
-void
-LowMachEquationSystem::zero_open_intersect_pressure_gradient()
-{
-    
-  stk::mesh::MetaData & meta_data = realm_.meta_data();
-  const int nDim = meta_data.spatial_dimension();
-
-  // field that we need
-  VectorFieldType *dpdx = continuityEqSys_->dpdx_;
-
-  auto * eastPart = realm_.meta_data().get_part("east") ;
-  auto * southPart = realm_.meta_data().get_part("south") ;
-  
-  stk::mesh::Selector op_intersect_nodes
-      = (stk::mesh::Selector(*eastPart)  & stk::mesh::Selector(*southPart));
-    
-  stk::mesh::BucketVector const& op_intersect_buckets =
-    realm_.get_buckets( stk::topology::NODE_RANK, op_intersect_nodes );
-  
-  // process loop
-  for ( stk::mesh::BucketVector::const_iterator ib = op_intersect_buckets.begin() ;
-        ib != op_intersect_buckets.end() ; ++ib ) {
-    stk::mesh::Bucket & b = **ib ;
-    const stk::mesh::Bucket::size_type length   = b.size();
-    double * dp = stk::mesh::field_data(*dpdx, b);
-    
-    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
-      // projection step
-      const size_t offSet = k*nDim;
-      for ( int j = 0; j < 2; ++j )
-          dp[offSet+j] = 0.0;
-      
-    }
-  }
-  
-}
-
 
 //--------------------------------------------------------------------------
 //-------- store_pressure_gradient------------------------------------------
@@ -894,6 +856,7 @@ LowMachEquationSystem::project_nodal_velocity()
   VectorFieldType *velocity = momentumEqSys_->velocity_;
   VectorFieldType &velocityNp1 = velocity->field_of_state(stk::mesh::StateNP1);
   VectorFieldType *uTmp = momentumEqSys_->uTmp_;
+  VectorFieldType *uDiagInv = momentumEqSys_->uDiagInv_;
   VectorFieldType *dpdx = continuityEqSys_->dpdx_;
   ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
 
@@ -913,6 +876,7 @@ LowMachEquationSystem::project_nodal_velocity()
         ib != p_node_buckets.end() ; ++ib ) {
     stk::mesh::Bucket & b = **ib ;
     const stk::mesh::Bucket::size_type length   = b.size();
+    double * udInv = stk::mesh::field_data(*uDiagInv, b);
     double * uNp1 = stk::mesh::field_data(velocityNp1, b);
     double * ut = stk::mesh::field_data(*uTmp, b);
     double * dp = stk::mesh::field_data(*dpdx, b);
@@ -920,12 +884,12 @@ LowMachEquationSystem::project_nodal_velocity()
     
     for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
       
-      // Get scaling factor
-      const double fac = projTimeScale/rho[k];
       
       // projection step
       const size_t offSet = k*nDim;
       for ( int j = 0; j < nDim; ++j ) {
+        // Get scaling factor
+        const double fac = udInv[offSet+j]/rho[k];
         const double gdpx = dp[offSet+j] - ut[offSet+j];
         uNp1[offSet+j] -= fac*gdpx;
       }
@@ -1059,6 +1023,10 @@ MomentumEquationSystem::register_nodal_fields(
   // delta solution for linear solver
   uTmp_ =  &(meta_data.declare_field<VectorFieldType>(stk::topology::NODE_RANK, "uTmp"));
   stk::mesh::put_field(*uTmp_, *part, nDim);
+
+  // Inverse of the diagonal of the momentum predictor matrix
+  uDiagInv_ =  &(meta_data.declare_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv"));
+  stk::mesh::put_field(*uDiagInv_, *part, nDim);
 
   coordinates_ =  &(meta_data.declare_field<VectorFieldType>(stk::topology::NODE_RANK, "coordinates"));
   stk::mesh::put_field(*coordinates_, *part, nDim);

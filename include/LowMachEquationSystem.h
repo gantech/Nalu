@@ -86,7 +86,6 @@ public:
 
   void project_nodal_velocity();
   void store_pressure_gradient();  
-  void zero_open_intersect_pressure_gradient();
   
   void post_converged_work();
 
@@ -175,6 +174,7 @@ public:
 
   VectorFieldType *coordinates_;
   VectorFieldType *uTmp_;
+  VectorFieldType *uDiagInv_;
 
   ScalarFieldType *visc_;
   ScalarFieldType *tvisc_;

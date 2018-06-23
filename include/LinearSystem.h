@@ -98,6 +98,12 @@ public:
     const char *trace_tag=0
     )=0;
 
+  virtual void getDiagonalInvAsField(
+      stk::mesh::FieldBase * diagInvField,
+      const stk::mesh::PartVector & parts,
+      const unsigned beginPos,
+      const unsigned endPos)=0;
+  
   virtual void applyDirichletBCs(
     stk::mesh::FieldBase * solutionField,
     stk::mesh::FieldBase * bcValuesField,

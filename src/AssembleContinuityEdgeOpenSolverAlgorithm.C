@@ -41,6 +41,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
   : SolverAlgorithm(realm, part, eqSystem),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
+    uDiagInv_(NULL),   
     Gpdx_(NULL),
     coordinates_(NULL),
     pressure_(NULL),
@@ -55,6 +56,7 @@ AssembleContinuityEdgeOpenSolverAlgorithm::AssembleContinuityEdgeOpenSolverAlgor
      velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
    else
      velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv"); 
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
@@ -201,6 +203,8 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
         const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
         const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
 
+        const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
+
         const double pressureL = *stk::mesh::field_data(*pressure_, nodeL );
         const double pressureR = *stk::mesh::field_data(*pressure_, nodeR );
         const double pressureIp = 0.5*(pressureL + pressureR);
@@ -224,17 +228,25 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
           asq += axj*axj;
           axdx += axj*dxj;
         }
+        double magA = sqrt(asq);
 
         const double inv_axdx = 1.0/axdx;
         const double rhoBip = densityR;
 
+        double uDiagInvFDotN = 0.0;
+        for ( int j = 0; j < nDim; ++j ) {
+            const double axj = areaVec[faceOffSet+j];
+            uDiagInvFDotN += uDiagInvR[j]*axj ;
+        }
+        uDiagInvFDotN /= magA ;
+
         //  mdot
-        double tmdot = -projTimeScale*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac + mdot[ip];
+        double tmdot = -uDiagInvFDotN*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac + mdot[ip];
         // rhs
-        p_rhs[nearestNode] -= tmdot/projTimeScale;
+        p_rhs[nearestNode] -= tmdot;
 
         // lhs right; IR, IL; IR, IR
-        double lhsfac = asq*inv_axdx*pstabFac;
+        double lhsfac = asq*inv_axdx*pstabFac*uDiagInvFDotN;
         p_lhs[rowR+nearestNode] += 0.5*lhsfac;
         p_lhs[rowR+opposingNode] += 0.5*lhsfac;
       }

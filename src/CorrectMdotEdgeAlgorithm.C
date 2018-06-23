@@ -40,6 +40,7 @@ CorrectMdotEdgeAlgorithm::CorrectMdotEdgeAlgorithm(
   : Algorithm(realm, part),
     meshMotion_(realm_.does_mesh_move()),
     velocityRTM_(NULL),
+    uDiagInv_(NULL),    
     Gpdx_(NULL),
     coordinates_(NULL),
     pressure_(NULL),
@@ -53,6 +54,7 @@ CorrectMdotEdgeAlgorithm::CorrectMdotEdgeAlgorithm(
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity_rtm");
   else
     velocityRTM_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "velocity");
+  uDiagInv_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "uDiagInv");   
   Gpdx_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, "dpdx");
   coordinates_ = meta_data.get_field<VectorFieldType>(stk::topology::NODE_RANK, realm_.get_coordinates_name());
   pressure_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "pressure");
@@ -129,6 +131,9 @@ CorrectMdotEdgeAlgorithm::execute()
       // extract nodal fields
       const double * coordL = stk::mesh::field_data(*coordinates_, nodeL );
       const double * coordR = stk::mesh::field_data(*coordinates_, nodeR );
+
+      const double * uDiagInvL = stk::mesh::field_data(*uDiagInv_, nodeL);
+      const double * uDiagInvR = stk::mesh::field_data(*uDiagInv_, nodeR);
       
       const double * GpdxL = stk::mesh::field_data(*Gpdx_, nodeL );
       const double * GpdxR = stk::mesh::field_data(*Gpdx_, nodeR );
@@ -155,8 +160,20 @@ CorrectMdotEdgeAlgorithm::execute()
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
+      std::vector<double> uDiagInvFParallel(3,0.0); // uDiag Inverse parallel to surface normal
+      double uDiagInvFDotN = 0.0; // uDiagInv interpolated to surface
+      for ( int j = 0; j < nDim; ++j ) {
+          const double axj = p_areaVec[j];
+          uDiagInvFDotN += 0.5*(uDiagInvR[j] + uDiagInvL[j])*axj ;
+      }
+      uDiagInvFDotN /= magA ;
+      for ( int j = 0; j < nDim; ++j ) {
+          const double axj = p_areaVec[j];          
+          uDiagInvFParallel[j] = 0.5*(uDiagInvR[j] + uDiagInvL[j]) - uDiagInvFDotN * axj/magA;
+      }
+      
       //  mdot
-      double tmdot = -projTimeScale*(pressureR - pressureL)*asq*inv_axdx;
+      double tmdot = -uDiagInvFDotN*(pressureR - pressureL)*asq*inv_axdx;
       mdot[k] += tmdot;
     }
   }
