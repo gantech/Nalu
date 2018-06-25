@@ -640,6 +640,13 @@ LowMachEquationSystem::solve_and_update()
     continuityEqSys_->timerMisc_ += (timeB-timeA);
     isInit_ = false;
   }
+
+  CopyFieldAlgorithm *pressureCopyAlg
+      = new CopyFieldAlgorithm(realm_, realm_.interiorPartVec_[0],
+                               continuityEqSys_->pTmp_,
+                               continuityEqSys_->pressure_,
+                               0, 1,
+                               stk::topology::NODE_RANK);
   
   // compute tvisc
   momentumEqSys_->tviscAlgDriver_->execute();
@@ -660,6 +667,8 @@ LowMachEquationSystem::solve_and_update()
     std::map<AlgorithmType, SolverAlgorithm *>::iterator itsi
         = momentumEqSys_->solverAlgDriver_->solverAlgMap_.find(algType);
     momentumEqSys_->linsys_->getDiagonalInvAsField(momentumEqSys_->uDiagInv_, itsi->second->partVec_, 0, nDim);
+
+    normalizeUdiagInv(momentumEqSys_->uDiagInv_);
     
     // update all of velocity
     timeA = NaluEnv::self().nalu_time();
@@ -672,48 +681,48 @@ LowMachEquationSystem::solve_and_update()
     timeB = NaluEnv::self().nalu_time();
     momentumEqSys_->timerAssemble_ += (timeB-timeA);
 
-    // store old pressure gradient
-    timeA = NaluEnv::self().nalu_time();
-    store_pressure_gradient();
-    timeB = NaluEnv::self().nalu_time();
-    timerMisc_ += (timeB-timeA);
+
+    for (int iCorr=0; iCorr < 1; iCorr++) {
+
+        // store old pressure gradient
+        timeA = NaluEnv::self().nalu_time();
+        store_pressure_gradient();
+        timeB = NaluEnv::self().nalu_time();
+        timerMisc_ += (timeB-timeA);
     
-    // compute velocity relative to mesh with new velocity
-    realm_.compute_vrtm();
+        // compute velocity relative to mesh with new velocity
+        realm_.compute_vrtm();
 
-    timeA = NaluEnv::self().nalu_time();
-    continuityEqSys_->computeMdotAlgDriver_->execute();
-    timeB = NaluEnv::self().nalu_time();
-    continuityEqSys_->timerMisc_ += (timeB-timeA);
+        timeA = NaluEnv::self().nalu_time();
+        continuityEqSys_->computeMdotAlgDriver_->execute();
+        timeB = NaluEnv::self().nalu_time();
+        continuityEqSys_->timerMisc_ += (timeB-timeA);
 
-    // continuity assemble, load_complete and solve
-    continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
+        // continuity assemble, load_complete and solve
+        continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
 
-    // update pressure
-    timeA = NaluEnv::self().nalu_time();
-    field_axpby(
-      realm_.meta_data(),
-      realm_.bulk_data(),
-      1.0, *continuityEqSys_->pTmp_,
-      1.0, *continuityEqSys_->pressure_,
-      realm_.get_activate_aura());
-    timeB = NaluEnv::self().nalu_time();
-    continuityEqSys_->timerAssemble_ += (timeB-timeA);
+        // update pressure
+        timeA = NaluEnv::self().nalu_time();
+        pressureCopyAlg->execute();
+        timeB = NaluEnv::self().nalu_time();
+        continuityEqSys_->timerAssemble_ += (timeB-timeA);
+        
+        // compute pressure gradient
+        continuityEqSys_->compute_projected_nodal_gradient();
 
-    // compute pressure gradient
-    continuityEqSys_->compute_projected_nodal_gradient();
+        // compute mdot
+        timeA = NaluEnv::self().nalu_time();
+        continuityEqSys_->correctMdotAlgDriver_->execute();
+        timeB = NaluEnv::self().nalu_time();
+        continuityEqSys_->timerMisc_ += (timeB-timeA);
 
-    // compute mdot
-    timeA = NaluEnv::self().nalu_time();
-    continuityEqSys_->correctMdotAlgDriver_->execute();
-    timeB = NaluEnv::self().nalu_time();
-    continuityEqSys_->timerMisc_ += (timeB-timeA);
-
-    // project nodal velocity
-    timeA = NaluEnv::self().nalu_time();
-    project_nodal_velocity();
-    timeB = NaluEnv::self().nalu_time();
-    timerMisc_ += (timeB-timeA);
+        // project nodal velocity
+        timeA = NaluEnv::self().nalu_time();
+        project_nodal_velocity();
+        timeB = NaluEnv::self().nalu_time();
+        timerMisc_ += (timeB-timeA);
+        
+    }
 
     // compute velocity relative to mesh with new velocity
     realm_.compute_vrtm();
@@ -754,6 +763,13 @@ LowMachEquationSystem::post_adapt_work()
     const bool solveCont = false;
     if ( solveCont ) {
 
+      CopyFieldAlgorithm *pressureCopyAlg
+          = new CopyFieldAlgorithm(realm_, realm_.interiorPartVec_[0],
+                                   continuityEqSys_->pTmp_,
+                                   continuityEqSys_->pressure_,
+                                   0, 1,
+                                   stk::topology::NODE_RANK);
+      
       // compute new nodal pressure gradient
       continuityEqSys_->compute_projected_nodal_gradient();
           
@@ -763,19 +779,16 @@ LowMachEquationSystem::post_adapt_work()
       continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
       
       // update pressure
-      field_axpby(
-          realm_.meta_data(),
-          realm_.bulk_data(),
-          1.0, *continuityEqSys_->pTmp_,
-          1.0, *continuityEqSys_->pressure_,
-          realm_.get_activate_aura());
+      pressureCopyAlg->execute();
+
+      // compute new nodal pressure gradient
+      continuityEqSys_->compute_projected_nodal_gradient();
+
+      // correct mdot
+      continuityEqSys_->correctMdotAlgDriver_->execute();
+      
     }
 
-    // compute new nodal pressure gradient
-    continuityEqSys_->compute_projected_nodal_gradient();
-
-    // correct mdot
-    continuityEqSys_->correctMdotAlgDriver_->execute();
 
     // project nodal velocity/gradU
     const bool processU = false;
@@ -792,6 +805,39 @@ LowMachEquationSystem::post_adapt_work()
 
 }
 
+void LowMachEquationSystem::normalizeUdiagInv(stk::mesh::FieldBase * diagInvField) {
+
+    stk::mesh::MetaData & meta_data = realm_.meta_data();
+    stk::mesh::BulkData & bulk_data = realm_.bulk_data();
+    ScalarFieldType * dualNodalVolume_ = meta_data.get_field<ScalarFieldType>(stk::topology::NODE_RANK, "dual_nodal_volume");
+    ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
+
+    // parallel assemble (contributions from locally owned) - NOT SURE IF I SHOULD BE DOING THIS
+    std::vector<stk::mesh::FieldBase*> sumFieldVec(1, diagInvField);
+    stk::mesh::parallel_sum(bulk_data, sumFieldVec);
+    
+    const stk::mesh::Selector selector 
+        = (meta_data.locally_owned_part() | meta_data.globally_shared_part())
+        & stk::mesh::selectField(*diagInvField) 
+        & !(realm_.get_inactive_selector());
+    stk::mesh::BucketVector const& node_buckets =
+        realm_.get_buckets( stk::topology::NODE_RANK, selector );
+    for ( stk::mesh::BucketVector::const_iterator ib = node_buckets.begin() ;
+          ib != node_buckets.end() ; ++ib ) {
+        stk::mesh::Bucket & b = **ib ;
+        const double * dualVolume = (double *)stk::mesh::field_data(*dualNodalVolume_, b);
+        const double * rho = stk::mesh::field_data(densityNp1, b);
+        const unsigned fieldSize = field_bytes_per_entity(*diagInvField, b) / sizeof(double);
+        const stk::mesh::Bucket::size_type length   = b.size();
+        double * diagInv = (double*)stk::mesh::field_data(*diagInvField, *b.begin());
+        for (stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+            for(unsigned d=0; d < fieldSize; d++) {
+                diagInv[k*fieldSize + d] *= (dualVolume[k]*rho[k]);
+            }
+        }
+    }
+    
+}
 //--------------------------------------------------------------------------
 //-------- store_pressure_gradient------------------------------------------
 //--------------------------------------------------------------------------

@@ -194,7 +194,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       }
       
       //  mdot
-      double tmdot = -uDiagInvFDotN*(pressureR - pressureL)*asq*inv_axdx + mdot[k];
+      double tmdot = mdot[k];
       const double lhsfac = -asq*inv_axdx*uDiagInvFDotN;
 
       /*

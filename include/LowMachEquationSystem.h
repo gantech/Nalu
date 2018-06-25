@@ -86,6 +86,8 @@ public:
 
   void project_nodal_velocity();
   void store_pressure_gradient();  
+
+  void normalizeUdiagInv(stk::mesh::FieldBase * diagInvField);
   
   void post_converged_work();
 
