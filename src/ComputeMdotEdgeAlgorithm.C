@@ -150,16 +150,13 @@ ComputeMdotEdgeAlgorithm::execute()
       // compute geometry
       double axdx = 0.0;
       double asq = 0.0;
-      double uDiagInvFDotN = 0.0;
+      double uDiagInvF = 0.5*(uDiagInvR[0] + uDiagInvL[0]);
       for ( int j = 0; j < nDim; ++j ) {
         const double axj = p_areaVec[j];
         const double dxj = coordR[j] - coordL[j];
-        uDiagInvFDotN += 0.5*(uDiagInvR[j] + uDiagInvL[j])*axj;
         asq += axj*axj;
         axdx += axj*dxj;
       }
-      const double magA = sqrt(asq);
-      uDiagInvFDotN /= magA;
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
@@ -171,9 +168,8 @@ ComputeMdotEdgeAlgorithm::execute()
         const double kxj = axj - asq*inv_axdx*dxj; // NOC
         const double rhoUjIp = 0.5*(densityR*vrtmR[j] + densityL*vrtmL[j]);
         const double ujIp = 0.5*(vrtmR[j] + vrtmL[j]);
-        const double uDiagInvGjIp = 0.5*(uDiagInvR[j]*GpdxR[j] + uDiagInvL[j]*GpdxL[j]);
         const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
-        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + uDiagInvFDotN*GjIp)*axj ;
+        tmdot += (interpTogether*rhoUjIp + om_interpTogether*rhoIp*ujIp + uDiagInvF*GjIp)*axj ;
       }
       // scatter to mdot
       mdot[k] = tmdot;

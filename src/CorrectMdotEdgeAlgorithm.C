@@ -160,20 +160,10 @@ CorrectMdotEdgeAlgorithm::execute()
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
-      std::vector<double> uDiagInvFParallel(3,0.0); // uDiag Inverse parallel to surface normal
-      double uDiagInvFDotN = 0.0; // uDiagInv interpolated to surface
-      for ( int j = 0; j < nDim; ++j ) {
-          const double axj = p_areaVec[j];
-          uDiagInvFDotN += 0.5*(uDiagInvR[j] + uDiagInvL[j])*axj ;
-      }
-      uDiagInvFDotN /= magA ;
-      for ( int j = 0; j < nDim; ++j ) {
-          const double axj = p_areaVec[j];          
-          uDiagInvFParallel[j] = 0.5*(uDiagInvR[j] + uDiagInvL[j]) - uDiagInvFDotN * axj/magA;
-      }
-      
+      double uDiagInvF = 0.5*(uDiagInvR[0] + uDiagInvL[0]);  // uDiagInv interpolated to surface
+          
       //  mdot
-      double tmdot = -uDiagInvFDotN*(pressureR - pressureL)*asq*inv_axdx;
+      double tmdot = -uDiagInvF*(pressureR - pressureL)*asq*inv_axdx;
       mdot[k] += tmdot;
     }
   }

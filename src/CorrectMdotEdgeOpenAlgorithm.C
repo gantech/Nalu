@@ -177,22 +177,19 @@ CorrectMdotEdgeOpenAlgorithm::execute()
         // compute geometry
         double axdx = 0.0;
         double asq = 0.0;
-        double uDiagInvFDotN = 0.0;
+        double uDiagInvF = uDiagInvR[0];
         for ( int j = 0; j < nDim; ++j ) {
           const double axj = areaVec[faceOffSet+j];
           const double coordIp = 0.5*(coordR[j] + coordL[j]);
           const double dxj = coordR[j]  - coordIp;
-          uDiagInvFDotN += uDiagInvR[j]*axj;
           asq += axj*axj;
           axdx += axj*dxj;
         }
-        const double magA = sqrt(asq);
-        uDiagInvFDotN /= magA ;
         const double inv_axdx = 1.0/axdx;
         const double rhoBip = densityR;
 
         // mdot
-        double tmdot = -uDiagInvFDotN*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac;
+        double tmdot = -uDiagInvF*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac;
         mdot[ip] += tmdot;
       }
     }
