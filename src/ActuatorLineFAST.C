@@ -209,15 +209,15 @@ ActuatorLineFAST::load(
       get_required(y_actuatorLine, "simStart", simStartType);
       if (simStartType == "init") {
 	if (fi.tStart == 0) {
-	  fi.simStart = fast::init;
+          fi.simStart = fast::INIT;
 	}
 	else {
 	  throw std::runtime_error("actuator_line: simStart type not consistent with start time for FAST");
 	}
       } else if(simStartType == "trueRestart") {
-	fi.simStart = fast::trueRestart;
+	fi.simStart = fast::TRUERESTART;
       } else if(simStartType == "restartDriverInitFAST") {
-	fi.simStart = fast::restartDriverInitFAST;
+	fi.simStart = fast::RESTARTDRIVERINITFAST;
       }
       get_required(y_actuatorLine, "n_every_checkpoint", fi.nEveryCheckPoint);
       get_required(y_actuatorLine, "dt_fast", fi.dtFAST);
@@ -657,13 +657,13 @@ ActuatorLineFAST::execute()
     // actuator line info object of interest
     ActuatorLineFASTPointInfo * infoObject = (*iterPoint).second;
 
-    FAST.getForce(ws_pointForce, np, infoObject->globTurbId_, fast::np1);
+    FAST.getForce(ws_pointForce, np, infoObject->globTurbId_, fast::STATE_NP1);
 
     std::vector<double> hubPos(3);
     std::vector<double> hubShftVec(3);
     int iTurbGlob = infoObject->globTurbId_;
-    FAST.getHubPos(hubPos, iTurbGlob, fast::np1);
-    FAST.getHubShftDir(hubShftVec, iTurbGlob, fast::np1);
+    FAST.getHubPos(hubPos, iTurbGlob, fast::STATE_NP1);
+    FAST.getHubShftDir(hubShftVec, iTurbGlob, fast::STATE_NP1);
 
     // get the vector of elements
     std::set<stk::mesh::Entity> nodeVec = infoObject->nodeVec_;
@@ -942,7 +942,7 @@ ActuatorLineFAST::create_actuator_line_point_info_map() {
 
 	  // set model coordinates from FAST
 	  // move the coordinates; set the velocity... may be better on the lineInfo object
-	  FAST.getForceNodeCoordinates(currentCoords, np, iTurb, fast::np1);
+	  FAST.getForceNodeCoordinates(currentCoords, np, iTurb, fast::STATE_NP1);
 
           double searchRadius = actuatorLineInfo->epsilon_.x_ * sqrt(log(1.0/0.001));
 
