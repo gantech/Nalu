@@ -237,11 +237,20 @@ AssembleContinuityEdgeOpenSolverAlgorithm::execute()
 
         //  mdot
         double tmdot = -0.5*uDiagInvF*(bcPressure)*asq*inv_axdx*pstabFac + mdot[ip];
+        for (int j = 0; j < nDim; ++j) {
+            const double axj = areaVec[faceOffSet+j];
+            const double coordIp = 0.5*(coordR[j] + coordL[j]);
+            const double dxj = coordR[j]  - coordIp;
+            const double kxj = axj - asq*inv_axdx*dxj; // NOC
+            const double GjIp = GpdxR[j];
+            tmdot -= uDiagInvF*kxj*GjIp*nocFac*pstabFac;
+        }
+        
         // rhs
         p_rhs[nearestNode] -= tmdot;
 
         // lhs right; IR, IL; IR, IR
-        double lhsfac = asq*inv_axdx*pstabFac*uDiagInvF;
+        double lhsfac = asq*inv_axdx*uDiagInvF*pstabFac;
 //        p_lhs[rowR+nearestNode] -= 0.5*lhsfac;
         p_lhs[rowR+opposingNode] += 0.5*lhsfac;
       }

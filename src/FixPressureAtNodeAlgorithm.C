@@ -73,7 +73,7 @@ FixPressureAtNodeAlgorithm::execute()
     const double pressureN = *stk::mesh::field_data(*pressure_, node);
 
     lhs[0] = 1.0; // Set diagonal entry to 1.0
-    rhs[0] = info_.refPressure_ - pressureN;
+    rhs[0] = info_.refPressure_;
 
     apply_coeff(refNodeList_, scratchIds, scratchVals, rhs, lhs, __FILE__);
   }

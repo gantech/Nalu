@@ -1191,8 +1191,18 @@ TpetraLinearSystem::getDiagonalInvAsField(
         matrix->getLocalRowView(actualLocalId, indices, values);
         const size_t rowLength = values.size();
         for(size_t i=0; i < rowLength; ++i) {
-            if (indices[i] == localId)
+            if (indices[i] == localId) {
                 diagInv[k*fieldSize + d] = 1.0/values[i];
+
+                if(diagInv[k*fieldSize + d]  > 10000.0) {
+                    
+                    std::cerr << "k = " << k  << std::endl; 
+                    std::cerr << "  localId = " << localId << std::endl;
+                    std::cerr << "  actualLocalId = " << actualLocalId << std::endl ;
+                    std::cerr << "  diag = " << values[i] << std::endl ;
+                    std::cerr << "  diagInv = " << diagInv[k*fieldSize + d] << std::endl ;
+                }
+            }
         }
       }
     }

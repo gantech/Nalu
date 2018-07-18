@@ -95,10 +95,10 @@ MomentumMassBDF2NodeSuppAlg::node_execute(
   const double lhsfac = gamma1_*rhoNp1*dualVolume/dt_;
   const int nDim = nDim_;
   for ( int i = 0; i < nDim; ++i ) {
-    rhs[i] += -(gamma1_*rhoNp1*uNp1[i] + gamma2_*rhoN*uN[i] + gamma3_*rhoNm1*uNm1[i])*dualVolume/dt_
-                    - dpdx[i]*dualVolume;
-    const int row = i*nDim;
-    lhs[row+i] += lhsfac;
+//    rhs[i] += -(gamma1_*rhoNp1*uNp1[i] + gamma2_*rhoN*uN[i] + gamma3_*rhoNm1*uNm1[i])*dualVolume/dt_
+      rhs[i] += - dpdx[i]*dualVolume;
+    // const int row = i*nDim;
+    // lhs[row+i] += lhsfac;
   }
 }
 

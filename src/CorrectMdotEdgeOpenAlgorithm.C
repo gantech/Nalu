@@ -190,6 +190,14 @@ CorrectMdotEdgeOpenAlgorithm::execute()
 
         // mdot
         double tmdot = -uDiagInvF*(bcPressure-pressureIp)*asq*inv_axdx*pstabFac;
+        for (int j = 0; j < nDim; ++j) {
+            const double axj = areaVec[faceOffSet+j];
+            const double coordIp = 0.5*(coordR[j] + coordL[j]);
+            const double dxj = coordR[j]  - coordIp;
+            const double kxj = axj - asq*inv_axdx*dxj; // NOC
+            const double GjIp = GpdxR[j];
+            tmdot -= uDiagInvF*kxj*GjIp*nocFac*pstabFac;
+        }
         mdot[ip] += tmdot;
       }
     }

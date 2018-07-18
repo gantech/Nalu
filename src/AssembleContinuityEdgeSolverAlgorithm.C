@@ -168,6 +168,7 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       const double densityL = *stk::mesh::field_data(densityNp1, nodeL);
       const double densityR = *stk::mesh::field_data(densityNp1, nodeR);
 
+      
       // compute geometry
       double axdx = 0.0;
       double asq = 0.0;
@@ -181,9 +182,18 @@ AssembleContinuityEdgeSolverAlgorithm::execute()
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
-      double uDiagInvF = 0.5*(uDiagInvR[0] + uDiagInvL[0]); // uDiagInv interpolated to surface
+      const double uDiagInvF = 0.5*(uDiagInvR[0] + uDiagInvL[0]); // uDiagInv interpolated to surface
+      
       //  mdot
       double tmdot = mdot[k];
+      for (int j = 0; j < nDim; ++j) {
+          const double axj = p_areaVec[j];
+          const double dxj = coordR[j] - coordL[j];
+          const double kxj = axj - asq*inv_axdx*dxj; // NOC
+          const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
+          tmdot -= uDiagInvF*kxj*GjIp*nocFac;
+      }
+
       const double lhsfac = -asq*inv_axdx*uDiagInvF;
 
       /*

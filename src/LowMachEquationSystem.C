@@ -81,6 +81,7 @@
 #include <MomentumMassBDF2NodeSuppAlg.h>
 #include <NaluEnv.h>
 #include <NaluParsing.h>
+#include <PeriodicManager.h>
 #include <ProjectedNodalGradientEquationSystem.h>
 #include <PostProcessingData.h>
 #include <PstabErrorIndicatorEdgeAlgorithm.h>
@@ -680,35 +681,36 @@ LowMachEquationSystem::solve_and_update()
       realm_.get_activate_aura());
     timeB = NaluEnv::self().nalu_time();
     momentumEqSys_->timerAssemble_ += (timeB-timeA);
+        
+    // compute velocity relative to mesh with new velocity
+    realm_.compute_vrtm();
 
+    timeA = NaluEnv::self().nalu_time();
+    continuityEqSys_->computeMdotAlgDriver_->execute();
+    timeB = NaluEnv::self().nalu_time();
+    continuityEqSys_->timerMisc_ += (timeB-timeA);
 
-    for (int iCorr=0; iCorr < 1; iCorr++) {
+    for (int iCorr=0; iCorr < 2; iCorr++) {
 
         // store old pressure gradient
         timeA = NaluEnv::self().nalu_time();
         store_pressure_gradient();
         timeB = NaluEnv::self().nalu_time();
         timerMisc_ += (timeB-timeA);
-    
-        // compute velocity relative to mesh with new velocity
-        realm_.compute_vrtm();
 
-        timeA = NaluEnv::self().nalu_time();
-        continuityEqSys_->computeMdotAlgDriver_->execute();
-        timeB = NaluEnv::self().nalu_time();
-        continuityEqSys_->timerMisc_ += (timeB-timeA);
+        for (int nonOrthCorr = 0; nonOrthCorr < 3; nonOrthCorr++) {
+            // continuity assemble, load_complete and solve
+            continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
 
-        // continuity assemble, load_complete and solve
-        continuityEqSys_->assemble_and_solve(continuityEqSys_->pTmp_);
-
-        // update pressure
-        timeA = NaluEnv::self().nalu_time();
-        pressureCopyAlg->execute();
-        timeB = NaluEnv::self().nalu_time();
-        continuityEqSys_->timerAssemble_ += (timeB-timeA);
+            // update pressure
+            timeA = NaluEnv::self().nalu_time();
+            pressureCopyAlg->execute();
+            timeB = NaluEnv::self().nalu_time();
+            continuityEqSys_->timerAssemble_ += (timeB-timeA);
         
-        // compute pressure gradient
-        continuityEqSys_->compute_projected_nodal_gradient();
+            // compute pressure gradient
+            continuityEqSys_->compute_projected_nodal_gradient();
+        }
 
         // compute mdot
         timeA = NaluEnv::self().nalu_time();
@@ -813,8 +815,15 @@ void LowMachEquationSystem::normalizeUdiagInv(stk::mesh::FieldBase * diagInvFiel
     ScalarFieldType &densityNp1 = density_->field_of_state(stk::mesh::StateNP1);
 
     // parallel assemble (contributions from locally owned) - NOT SURE IF I SHOULD BE DOING THIS
-    std::vector<stk::mesh::FieldBase*> sumFieldVec(1, diagInvField);
-    stk::mesh::parallel_sum(bulk_data, sumFieldVec);
+    std::vector<const stk::mesh::FieldBase*> fVec{diagInvField};
+    stk::mesh::copy_owned_to_shared(bulk_data, fVec);
+
+    if (realm_.periodicManager_ != nullptr &&
+        realm_.periodicManager_->periodicGhosting_ != nullptr) {
+        realm_.periodicManager_->parallel_communicate_field(diagInvField);
+        realm_.periodicManager_->periodic_parallel_communicate_field(
+            diagInvField);
+    }
     
     const stk::mesh::Selector selector 
         = (meta_data.locally_owned_part() | meta_data.globally_shared_part())

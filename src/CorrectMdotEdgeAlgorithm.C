@@ -156,14 +156,23 @@ CorrectMdotEdgeAlgorithm::execute()
         asq += axj*axj;
         axdx += axj*dxj;
       }
-      double magA = sqrt(asq);
       const double inv_axdx = 1.0/axdx;
       const double rhoIp = 0.5*(densityR + densityL);
 
       double uDiagInvF = 0.5*(uDiagInvR[0] + uDiagInvL[0]);  // uDiagInv interpolated to surface
+
+      
           
       //  mdot
       double tmdot = -uDiagInvF*(pressureR - pressureL)*asq*inv_axdx;
+      for (int j = 0; j < nDim; ++j) {
+          const double axj = p_areaVec[j];
+          const double dxj = coordR[j] - coordL[j];
+          const double kxj = axj - asq*inv_axdx*dxj; // NOC
+          const double GjIp = 0.5*(GpdxR[j] + GpdxL[j]);
+          tmdot -= uDiagInvF*kxj*GjIp*nocFac;
+      }
+      
       mdot[k] += tmdot;
     }
   }
